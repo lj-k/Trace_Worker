@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.05.2</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.05.2">
+<meta name="version" content="0.06">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -261,7 +261,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.05.2 · 作者 konglingjun">v0.05.2</span></div>
+    <span class="ver" id="verTag" title="版本 0.06 · 作者 konglingjun">v0.06</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -596,9 +596,39 @@ const BUILTIN = {
     'TriPF_L2.READY'   :{'1':'L2 已接收','0':'L2 反压丢弃'},
     'L2C_CMP.STAL'     :{'1':'被阻塞','0':'正常推进'},
     'L2C_CMP.WRIT'     :{'1':'写事务','0':'读事务'},
-    'L2C_CMP.SRC'      :{'00':'核内请求','01':'外部/其他源'}
+    'L2C_CMP.SRC'      :{'00':'核内请求','01':'外部/其他源'},
+    /* --- AXI4 / ACE 协议规定的编码，与具体实现无关，可直接采信 --- */
+    'BIU_PAD_AR.BURS'  :{'0':'FIXED 固定地址','1':'INCR 地址递增','2':'WRAP 回环'},
+    'BIU_PAD_AW.BURS'  :{'0':'FIXED 固定地址','1':'INCR 地址递增','2':'WRAP 回环'},
+    'BIU_PAD_AR.DOMA'  :{'0':'Non-shareable 不共享','1':'Inner-shareable 内层共享','2':'Outer-shareable 外层共享','3':'System 系统域'},
+    'BIU_PAD_AW.DOMA'  :{'0':'Non-shareable 不共享','1':'Inner-shareable 内层共享','2':'Outer-shareable 外层共享','3':'System 系统域'},
+    'BIU_PAD_AR.LOCK'  :{'0':'Normal 普通访问','1':'Exclusive 独占访问'},
+    'BIU_PAD_AW.LOCK'  :{'0':'Normal 普通访问','1':'Exclusive 独占访问'},
+    'BIU_PAD_AR.BARR'  :{'0':'Normal access 普通','1':'Memory barrier 内存屏障','2':'Ignore 普通','3':'Synchronisation 同步屏障'},
+    'BIU_PAD_AW.BARR'  :{'0':'Normal access 普通','1':'Memory barrier 内存屏障','2':'Ignore 普通','3':'Synchronisation 同步屏障'}
   }
 };
+/* AXI/ACE 中需要按位/按幂计算的字段，用函数解码（静态映射表列不完） */
+const AXI_TAG={BIU_PAD_AR:1,BIU_PAD_AW:1};
+function axiCalc(tag,k,v,d){
+  if(!AXI_TAG[tag]||isXZ(v))return null;
+  const n=parseInt(v,16);                       // trace 中 AXI 边带按十六进制打印（如 CACH:f）
+  if(!isFinite(n))return null;
+  if(k==='SIZE')return (1<<n)+' 字节/拍';
+  if(k==='LENG'){
+    const sz=d&&d.SIZE!==undefined?parseInt(d.SIZE,16):NaN;
+    return isFinite(sz)?((n+1)+' 拍突发 · 共 '+((n+1)*(1<<sz))+' 字节'):((n+1)+' 拍突发');
+  }
+  if(k==='CACH'){
+    if(n===0)return 'Device Non-bufferable';
+    const b=['Bufferable 可缓冲','Modifiable 可改写','Read-Allocate 读分配','Write-Allocate 写分配'].filter((_,i)=>(n>>i)&1);
+    return b.join(' · ')||'—';
+  }
+  if(k==='PROT')return [(n&1)?'Privileged 特权':'Unprivileged 用户',
+                        (n&2)?'Non-secure 非安全':'Secure 安全',
+                        (n&4)?'Instruction 取指':'Data 数据'].join(' · ');
+  return null;
+}
 const LS_KEY='c910trace.dict.v1';
 let DICT=JSON.parse(JSON.stringify(BUILTIN));
 try{const s=localStorage.getItem(LS_KEY);if(s){const o=JSON.parse(s);
@@ -644,6 +674,25 @@ const S={
 const $=id=>document.getElementById(id);
 const fmt=n=>n.toLocaleString('en-US');
 const pct=(a,b)=>b?(a/b*100).toFixed(1)+'%':'—';
+
+/* RTL 仿真未定义态判定（x / z）
+   ⚠ 常见错误写法是直接 /[xXzZ]/.test(v)，那会把十六进制串 "0x1234" 里的前缀 x
+   误判成未定义态，导致几乎每条事件都被标红。正确做法：先剥离 0x 前缀与下划线，
+   再判断——余下部分整体由 x/z 组成（如 xxxxxxxxxxxxxxxx），
+   或原值带 0x 前缀且余下部分是「十六进制位 + x/z」的混合（如 0x12xx，部分位未定义）。 */
+function isXZ(v){
+  if(v===undefined||v===null)return false;
+  let s=String(v).trim();
+  if(!s)return false;
+  const hx=/^0[xX]/.test(s);
+  s=s.replace(/^0[xX]/,'').replace(/_/g,'');
+  if(!s)return false;
+  if(/^[xXzZ]+$/.test(s))return true;                                   // 全 x/z
+  if(hx&&/[xXzZ]/.test(s)&&/^[0-9a-fA-FxXzZ]+$/.test(s))return true;    // 0x 前缀下的部分未定义
+  return false;
+}
+/* 返回该事件中第一个处于未定义态的字段名，没有则返回 null */
+function xzField(e){for(const k in e.d)if(isXZ(e.d[k]))return k;return null;}
 
 /* =======================================================================
    2. 解析
@@ -966,6 +1015,7 @@ const TL={
   lanes:[],           // {tag,y,h,color,label}
   padL:132,padT:52,padR:12,padB:12,
   navH:34,
+  vZoom:1,vScroll:0,  // 纵轴（泳道）缩放与纵向滚动
   drag:null,hover:-1,
   nav:null
 };
@@ -995,17 +1045,19 @@ function tlLanes(){
   for(const t of on){const g=tagMeta(t).group;if(!gmap[g]){gmap[g]=[];groups.push(g);}gmap[g].push(t);}
   const avail=TL.H-TL.padT-TL.padB-TL.navH;
   const rows=on.length,gaps=groups.length;
-  let lh=Math.max(15,Math.min(48,(avail-gaps*9)/Math.max(1,rows)));
+  let lh=Math.max(15,Math.min(48,(avail-gaps*9)/Math.max(1,rows)))*TL.vZoom;
   const lanes=[];let y=TL.padT;
   for(const g of groups){
-    lanes.push({group:g,y:y,h:0,isGroup:true});
+    lanes.push({group:g,y:y-TL.vScroll,h:0,isGroup:true});
     y+=9;
     for(const t of gmap[g]){
-      lanes.push({tag:t,y:y,h:lh,color:tagMeta(t).color,label:tagMeta(t).label});
+      lanes.push({tag:t,y:y-TL.vScroll,h:lh,color:tagMeta(t).color,label:tagMeta(t).label});
       y+=lh;
     }
   }
   TL.lanes=lanes;TL.laneH=lh;TL.contentBottom=y;
+  const maxScroll=Math.max(0,y-(TL.H-TL.padB-TL.navH));
+  if(TL.vScroll>maxScroll)TL.vScroll=maxScroll; if(TL.vScroll<0)TL.vScroll=0;
 }
 function xOf(c){const w=TL.W-TL.padL-TL.padR;return TL.padL+(c-TL.t0)/(TL.t1-TL.t0)*w;}
 function cOf(x){const w=TL.W-TL.padL-TL.padR;return TL.t0+(x-TL.padL)/w*(TL.t1-TL.t0);}
@@ -1019,7 +1071,7 @@ function tlFit(){
   if(!idx.length){TL.t0=S.minCyc;TL.t1=S.maxCyc||1;}
   else{TL.t0=S.raw[idx[0]].cyc;TL.t1=S.raw[idx[idx.length-1]].cyc;}
   const sp=Math.max(1,TL.t1-TL.t0);TL.t0-=sp*0.01;TL.t1+=sp*0.01;
-  tlDraw();
+  TL.vZoom=1;TL.vScroll=0;tlDraw();
 }
 function tlZoom(f,cx){
   const c=cx===undefined?(TL.t0+TL.t1)/2:cOf(cx);
@@ -1029,10 +1081,23 @@ function tlZoom(f,cx){
   if(b-a>lim){a=S.minCyc-lim*0.02;b=a+lim;}
   TL.t0=a;TL.t1=b;tlDraw();
 }
+/* 把时序图居中到指定周期（默认沿用当前跨度，最宽不超过 4000 周期，便于定位单条事件） */
+function tlFocus(cyc,span){
+  let sp=span||Math.min(TL.t1-TL.t0,4000);
+  if(!(sp>0))sp=200;
+  TL.t0=cyc-sp/2;TL.t1=cyc+sp/2;tlDraw();
+}
 function tlWheel(e){
   e.preventDefault();
   const r=TL.cv.getBoundingClientRect();
-  if(e.shiftKey){const d=(TL.t1-TL.t0)*0.12*Math.sign(e.deltaY);TL.t0+=d;TL.t1+=d;tlDraw();return;}
+  if(e.shiftKey){ // 缩放纵轴（泳道高度），以光标处内容为锚
+    const f=e.deltaY>0?1/1.18:1.18;
+    const nvz=Math.max(0.4,Math.min(8,TL.vZoom*f));
+    const ratio=nvz/TL.vZoom;TL.vZoom=nvz;
+    const sy=e.clientY-r.top, cy=sy+TL.vScroll;
+    const cyp=TL.padT+(cy-TL.padT)*ratio;
+    TL.vScroll=Math.max(0,cyp-sy);tlDraw();return;
+  }
   tlZoom(e.deltaY>0?1.22:1/1.22,e.clientX-r.left);
 }
 function tlDown(e){
@@ -1043,7 +1108,7 @@ function tlDown(e){
     const sp=TL.t1-TL.t0;TL.t0=c-sp/2;TL.t1=c+sp/2;
     TL.drag={mode:'nav'};tlDraw();return;
   }
-  TL.drag={mode:e.shiftKey?'sel':'pan',x0:x,y0:y,t0:TL.t0,t1:TL.t1,x1:x};
+  TL.drag={mode:e.shiftKey?'sel':'pan',x0:x,y0:y,my:e.clientY-r.top,vScroll0:TL.vScroll,t0:TL.t0,t1:TL.t1,x1:x};
 }
 function tlMove(e){
   const r=TL.cv.getBoundingClientRect();
@@ -1052,7 +1117,8 @@ function tlMove(e){
     if(TL.drag.mode==='pan'){
       const w=TL.W-TL.padL-TL.padR;
       const d=(TL.drag.x0-x)/w*(TL.drag.t1-TL.drag.t0);
-      TL.t0=TL.drag.t0+d;TL.t1=TL.drag.t1+d;tlDraw();
+      TL.t0=TL.drag.t0+d;TL.t1=TL.drag.t1+d;
+      TL.vScroll=Math.max(0,TL.drag.vScroll0+(e.clientY-TL.drag.my0));tlDraw();
     }else if(TL.drag.mode==='sel'){TL.drag.x1=x;tlDraw();}
     else if(TL.drag.mode==='nav'){
       const c=S.minCyc+(x/TL.W)*(S.maxCyc-S.minCyc);
@@ -1133,6 +1199,7 @@ function tlDraw(){
   cx.fillText('周期 (cycle)',6,26);
 
   /* --- 泳道背景与标签 --- */
+  cx.save();cx.beginPath();cx.rect(0,TL.padT-8,W,(TL.H-TL.navH)-(TL.padT-8));cx.clip();
   let alt=0;
   for(const L of TL.lanes){
     if(L.isGroup){
@@ -1150,6 +1217,7 @@ function tlDraw(){
     cx.fillStyle=C.fg3;cx.font='9px '+css.getPropertyValue('--mono');cx.textAlign='right';
     cx.fillText(fmt(cnt),TL.padL-6,L.y+L.h/2+3);
   }
+  cx.restore();
   cx.strokeStyle=C.line2;cx.beginPath();cx.moveTo(TL.padL-.5,TL.padT-8);cx.lineTo(TL.padL-.5,TL.contentBottom);cx.stroke();
 
   /* --- 事件绘制 --- */
@@ -1336,13 +1404,15 @@ function pvInit(){
   new ResizeObserver(()=>{pvResize();pvDraw();}).observe($('pvWrap'));
   PV.cv.addEventListener('wheel',e=>{
     e.preventDefault();
-    if(e.ctrlKey||e.metaKey||e.shiftKey){
+    if(e.ctrlKey||e.metaKey){ // 缩放时间轴（X）
       const r=PV.cv.getBoundingClientRect();
       const x=e.clientX-r.left;
       const w=PV.W-PV.padL-PV.padR;
       const c=PV.t0+(x-PV.padL)/w*(PV.t1-PV.t0);
       const f=e.deltaY>0?1.22:1/1.22;
       PV.t0=c-(c-PV.t0)*f;PV.t1=c+(PV.t1-c)*f;
+    }else if(e.shiftKey){ // 缩放纵轴（事务行高）
+      PV.rowH=Math.max(4,Math.min(120,PV.rowH*(e.deltaY>0?1/1.18:1.18)));
     }else{
       PV.scroll=Math.max(0,PV.scroll+e.deltaY);
       const maxS=Math.max(0,PV.list.length*PV.rowH-(PV.H-PV.padT)+20);
@@ -1686,16 +1756,25 @@ function selectEvent(i,scroll=true){
     }
   }
 
+  const xk0=xzField(e);
+  if(xk0)h+='<div style="margin-top:8px;padding:7px 9px;border-radius:6px;background:rgba(255,95,109,.12);'
+    +'border:1px solid #7f2d2d;color:#ff5f6d;font-size:11px;line-height:1.6">'
+    +'⚠ 该事件的 <b>'+xk0+'</b> 字段为仿真未定义态（x/z），说明信号未复位、握手前无效拍或读到未初始化存储。</div>';
+
   h+='<div class="dsec">字段</div><table class="dtable">';
   for(const k in e.d){
     const fm=fieldMeta(k);
     const v=e.d[k];
-    const vl=valLabel(e.tag,k,v);
-    h+='<tr><td title="'+(fm.label||k)+'">'+k+'</td><td><b>'+v+'</b>';
+    const xz=isXZ(v);
+    const vl=xz?null:valLabel(e.tag,k,v);
+    h+='<tr><td title="'+(fm.label||k)+'">'+k+'</td><td><b'+(xz?' style="color:#ff5f6d"':'')+'>'+v+'</b>';
+    if(xz)h+=' <span style="color:#ff5f6d;font-size:10px">⚠ 未定义态</span>';
     if(vl)h+=' <span style="color:var(--acc2)">'+vl+'</span>';
+    const ax=axiCalc(e.tag,k,v,e.d);
+    if(ax)h+=' <span style="color:var(--acc2)">'+ax+'</span>';
     if(fm.label&&fm.label!==k)h+='<div style="color:var(--fg3);font-size:10px">'+fm.label+'</div>';
-    if(fm.hex){const n=parseInt(v,16);if(isFinite(n))h+='<div style="color:var(--fg3);font-size:10px">十进制 '+fmt(n)+'</div>';}
-    if(fm.bits||fm.bin||fm.onehot){
+    if(fm.hex&&!xz){const n=parseInt(v,16);if(isFinite(n))h+='<div style="color:var(--fg3);font-size:10px">十进制 '+fmt(n)+'</div>';}
+    if((fm.bits||fm.bin||fm.onehot)&&!xz){
       const bits=fm.bin?v.split(''):(parseInt(v,16)>>>0).toString(2).padStart(Math.max(4,v.length*4),'0').split('');
       h+='<div class="bits">';
       for(let bi=0;bi<bits.length;bi++){
@@ -1861,6 +1940,17 @@ function statsRender(){
   const leads=pfs.filter(o=>o.usedLater).map(o=>o.lead).sort((a,b)=>a-b);
   const ql=p=>leads.length?leads[Math.min(leads.length-1,Math.floor(leads.length*p))]:0;
 
+  /* RTL 仿真未定义态 (x/z) 扫描：按 tag.field 归类计数，并记录命中事件下标 */
+  const xMap={},xEvt=[];let xTotal=0;
+  for(const i of idx){
+    const e=raw[i];let hit=false;
+    for(const f in e.d){
+      if(isXZ(e.d[f])){const k=e.tag+'.'+f;xMap[k]=(xMap[k]||0)+1;xTotal++;hit=true;}
+    }
+    if(hit)xEvt.push(i);
+  }
+  const xEnts=Object.entries(xMap).sort((a,b)=>b[1]-a[1]);
+
   h+='<div class="cards">';
   const card=(l,v,s,c)=>'<div class="card"><div class="lb">'+l+'</div><div class="vl"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div>'+(s?'<div class="sb">'+s+'</div>':'')+'</div>';
   h+=card('可见事件',fmt(n),'总计 '+fmt(raw.length));
@@ -1875,7 +1965,27 @@ function statsRender(){
     h+=card('及时有用预取',pct(pfUse,pfs.length),'提前量 ≤ '+fmt(S.win.pfLead)+' 周期',pfUse/pfs.length>.5?'#52d38a':'#f0a03c');
     h+=card('过早预取',pct(pfEarly,pfs.length),'被访问时已远超窗口','#f0a03c');
   }
+  if(xTotal)h+=card('⚠ 仿真未定义态',fmt(xTotal),
+    xEnts.slice(0,3).map(e=>e[0]).join(' · ')+(xEnts.length>3?' 等 '+xEnts.length+' 个字段':''),'#ff5f6d');
   h+='</div>';
+
+  /* RTL 仿真未定义态明细 */
+  if(xTotal){
+    h+='<div class="panel" style="border-color:#7f2d2d"><h4>⚠ RTL 仿真未定义态 (x/z)　'
+      +'<span style="color:var(--fg3);font-weight:400">共 '+fmt(xTotal)+' 处，涉及 '+fmt(xEvt.length)+' 条事件</span></h4>'
+      +'<div class="hint"><b>判定规则：</b>先剥离 <code>0x</code> 前缀与下划线，再要求余下字符整体由 <code>x</code>/<code>z</code> 组成'
+      +'（如 <code>xxxxxxxxxxxxxxxx</code>），或带 <code>0x</code> 前缀且十六进制位中混有 x/z（如 <code>0x12xx</code>，部分位未定义）。'
+      +'若直接用 <code>/[xXzZ]/</code> 匹配整串，十六进制前缀 <code>0x1234</code> 里的 <code>x</code> 会被误判成未定义态。<br>'
+      +'未定义态一般对应：信号未复位、总线握手成立前的无效拍、读到未初始化的 SRAM，或跨时钟域采样到亚稳态建模值。'
+      +'如果它出现在有效握手周期内，通常是真实设计缺陷。</div>'
+      +'<table class="st"><tr><th>字段</th><th class="num">出现次数</th><th></th><th class="num">占可见事件</th></tr>';
+    const xmx=xEnts[0][1];
+    for(const [k,c] of xEnts)h+=barRow('<span style="color:#ff5f6d">'+k+'</span>',c,xmx,pct(c,n));
+    h+='</table>'
+      +'<button class="btn" id="btnGotoX" style="margin-top:10px">→ 跳转到首个 x 态事件（周期 '
+      +fmt(raw[xEvt[0]].cyc)+' · 源文件行 '+raw[xEvt[0]].ln+'）</button>'
+      +'</div>';
+  }
 
   /* 事件分布 */
   const cnt={};for(const i of idx)cnt[raw[i].tag]=(cnt[raw[i].tag]||0)+1;
@@ -1970,6 +2080,44 @@ function statsRender(){
         +'<div style="margin-top:9px;font-size:11px;color:var(--fg2);font-family:var(--mono)">'
         +'P10 '+fmt(ql(.1))+' · P25 '+fmt(ql(.25))+' · P50 '+fmt(ql(.5))+' · P75 '+fmt(ql(.75))
         +' · P90 '+fmt(ql(.9))+' · Max '+fmt(leads[leads.length-1])+' 周期</div>';
+      /* 覆盖率 vs 评估窗口：把「有用率」当成窗口 W 的函数连续扫一遍，
+         避免只看单一阈值就下结论。横轴取 2 的幂（对数刻度），纵轴为占全部预取的百分比。 */
+      {
+        const ws=[];for(let w=16;w<=32768;w*=2)ws.push(w);
+        const cov=ws.map(w=>leads.filter(l=>l<=w).length/pfs.length*100);
+        const covMax=leads.length/pfs.length*100;
+        const W0=580,H0=126,pl=44,pr=12,ptp=10,pbt=26;
+        const sx=i=>pl+i/(ws.length-1)*(W0-pl-pr);
+        const sy=v=>ptp+(1-v/100)*(H0-ptp-pbt);
+        let g='';
+        for(let p=0;p<=100;p+=25){
+          g+='<line x1="'+pl+'" y1="'+sy(p).toFixed(1)+'" x2="'+(W0-pr)+'" y2="'+sy(p).toFixed(1)
+            +'" stroke="var(--bd)" stroke-width="1"/>'
+            +'<text x="'+(pl-6)+'" y="'+(sy(p)+3.5).toFixed(1)+'" fill="var(--fg3)" font-size="9" text-anchor="end">'+p+'%</text>';
+        }
+        for(let i=0;i<ws.length;i+=2){
+          g+='<text x="'+sx(i).toFixed(1)+'" y="'+(H0-9)+'" fill="var(--fg3)" font-size="9" text-anchor="middle">'
+            +(ws[i]>=1024?(ws[i]/1024)+'k':ws[i])+'</text>';
+        }
+        g+='<polyline fill="none" stroke="var(--acc)" stroke-width="2" points="'
+          +ws.map((w,i)=>sx(i).toFixed(1)+','+sy(cov[i]).toFixed(1)).join(' ')+'"/>';
+        g+='<line x1="'+pl+'" y1="'+sy(covMax).toFixed(1)+'" x2="'+(W0-pr)+'" y2="'+sy(covMax).toFixed(1)
+          +'" stroke="var(--ok)" stroke-dasharray="4 3" stroke-width="1"/>'
+          +'<text x="'+(W0-pr)+'" y="'+(sy(covMax)-4).toFixed(1)+'" fill="var(--ok)" font-size="9" text-anchor="end">上界 '+covMax.toFixed(1)+'%（窗口不限）</text>';
+        const ci=ws.findIndex(w=>w>=S.win.pfLead);
+        if(ci>=0){
+          g+='<line x1="'+sx(ci).toFixed(1)+'" y1="'+ptp+'" x2="'+sx(ci).toFixed(1)+'" y2="'+(H0-pbt)
+            +'" stroke="var(--warn)" stroke-width="1"/>'
+            +'<circle cx="'+sx(ci).toFixed(1)+'" cy="'+sy(cov[ci]).toFixed(1)+'" r="3.5" fill="var(--warn)"/>';
+        }
+        h+='<h4 style="margin-top:15px">预取覆盖率 vs 评估窗口</h4>'
+          +'<div class="hint">同一批预取，换个「多久算及时」的口径，结论可以差出几十个百分点。'
+          +'曲线越早抬起说明预取发得越贴近使用点；曲线长期贴地、只在大窗口才抬起，说明预取过早。'
+          +'绿色虚线是窗口不限时的覆盖率上界（= 曾被访问过的预取占比），橙色竖线为当前阈值 '+fmt(S.win.pfLead)+' cyc。</div>'
+          +'<svg viewBox="0 0 '+W0+' '+H0+'" style="width:100%;max-width:'+W0+'px;height:auto;display:block;margin:4px 0 2px">'+g+'</svg>'
+          +'<div style="text-align:center;font-size:10px;color:var(--fg3);margin-bottom:4px">评估窗口 W（周期，对数刻度）</div>';
+      }
+
       /* 阈值敏感性 */
       h+='<div style="margin-top:11px"><b style="font-size:11.5px">判定阈值敏感性</b>'
         +'<table class="st" style="margin-top:5px"><tr><th>提前量阈值</th><th class="num">及时有用数</th><th></th><th class="num">占全部预取</th></tr>';
@@ -2050,6 +2198,8 @@ function statsRender(){
       switchPane('timeline');applyFilter();tlFit();
     };
   });
+  const gx=$('btnGotoX');
+  if(gx&&xEvt.length)gx.onclick=()=>{switchPane('timeline');tlFocus(raw[xEvt[0]].cyc);selectEvent(xEvt[0],true);};
 }
 
 /* =======================================================================
@@ -2267,7 +2417,7 @@ function miniDown(e){
   else mode='new';
   const xc=miniX2cyc(x);
   Mini.drag={mode,xc,a,b};
-  if(mode==='new'){const w=b-a;let na=xc-w/2,nb=xc+w/2;if(na<min){na=min;nb=min+w;}if(nb>max){nb=max;na=max-w;}c.setWin(na,nb);Mini.drag.a=na;Mini.drag.b=nb;Mini.drag.xc=xc;}
+  if(mode==='new'){const w=b-a;let na=xc-w/2,nb=xc+w/2;if(na<min){na=min;nb=min+w;}if(nb>max){nb=max;na=max-w;}c.setWin(na,nb);Mini.drag.a=na;Mini.drag.b=nb;Mini.drag.xc=xc;Mini.drag.anchor=xc;}
 }
 function miniMove(e){
   if(!Mini.drag)return;
@@ -2275,7 +2425,12 @@ function miniMove(e){
   const min=S.minCyc,max=S.maxCyc,rg=Math.max(1,max-min);
   const cc=miniX2cyc(x),d=cc-Mini.drag.xc;
   let a=Mini.drag.a,b=Mini.drag.b;
-  if(Mini.drag.mode==='pan'||Mini.drag.mode==='new'){a=Mini.drag.a+d;b=Mini.drag.b+d;}
+  if(Mini.drag.mode==='pan'){a=Mini.drag.a+d;b=Mini.drag.b+d;}
+  else if(Mini.drag.mode==='new'){
+    if(Math.abs(cc-Mini.drag.anchor)>3){ // 从空白区拖动 → 绘制全新时间选区（按下点为起点）
+      a=Math.min(Mini.drag.anchor,cc);b=Math.max(Mini.drag.anchor,cc);
+    }else{a=Mini.drag.a+d;b=Mini.drag.b+d;} // 否则保持宽度平移（单击重定位）
+  }
   else if(Mini.drag.mode==='l')a=cc;
   else if(Mini.drag.mode==='r')b=cc;
   const lim=(max-min)*6+100;
@@ -2330,6 +2485,7 @@ function redraw(){
 const ACC={cv:null,cx:null,W:0,H:0,dpr:1,
   view:'atime',axis:'num',k:40,
   t0:NaN,t1:NaN,_minC:0,_maxC:1,drag:null,hover:null,_view:undefined,_cs:-1,
+  y0:NaN,y1:NaN,                 // 纵轴（地址/缓存行）可见范围；Shift+滚轮缩放
   cache:null,stamp:-1,points:[],grid:null,padL:62,padR:14,padT:30,padB:30};
 
 function accInit(){
@@ -2339,6 +2495,21 @@ function accInit(){
     if(ACC.view!=='atime')return;
     e.preventDefault();
     const r=ACC.cv.getBoundingClientRect();
+    if(e.shiftKey){ // 缩放纵轴（地址 / 缓存行）到光标 Y
+      if(!ACC.cache)return;
+      const minA=ACC.cache.minA,maxA=ACC.cache.maxA,nA=ACC.cache.byAddl.size;
+      const lo=ACC.axis==='row'?0:nA?minA:0, hi=ACC.axis==='row'?nA:maxA;
+      if(!(isFinite(ACC.y0)&&isFinite(ACC.y1)&&ACC.y1>ACC.y0)){ACC.y0=lo;ACC.y1=hi;}
+      const plotH=ACC.H-ACC.padT-ACC.padB;
+      const my=e.clientY-r.top;
+      const vy=ACC.y0+(my-ACC.padT)/plotH*(ACC.y1-ACC.y0);
+      const f=e.deltaY>0?1.18:1/1.18;
+      let a=vy+(ACC.y0-vy)*f, b=vy+(ACC.y1-vy)*f;
+      if(a<lo){const d=lo-a;a+=d;b+=d;}
+      if(b>hi){const d=b-hi;b-=d;a-=d;}
+      if(b-a<1){const m=(a+b)/2;a=m-0.5;b=m+0.5;}
+      ACC.y0=a;ACC.y1=b;accRender();return;
+    }
     const x=e.clientX-r.left;
     const w=ACC.W-ACC.padL-ACC.padR;if(w<=0)return;
     const c=ACC.t0+(x-ACC.padL)/w*(ACC.t1-ACC.t0);
@@ -2377,7 +2548,7 @@ function accInit(){
     }
   });
   window.addEventListener('mouseup',()=>{ACC.drag=null;});
-  ACC.cv.addEventListener('dblclick',()=>{if(ACC.view==='atime'){ACC.t0=ACC._minC;ACC.t1=ACC._maxC;accRender();}});
+  ACC.cv.addEventListener('dblclick',()=>{if(ACC.view==='atime'){ACC.t0=ACC._minC;ACC.t1=ACC._maxC;ACC.y0=NaN;ACC.y1=NaN;accRender();}});
   ACC.cv.addEventListener('click',e=>{
     const r=ACC.cv.getBoundingClientRect();
     const x=e.clientX-r.left,y=e.clientY-r.top;
@@ -2506,13 +2677,17 @@ function accDrawAtime(C,c){
     ACC._minC=isFinite(mn)?mn:S.minCyc;ACC._maxC=isFinite(mx)?mx:S.maxCyc;
     ACC.t0=ACC._minC;ACC.t1=ACC._maxC;t0=ACC.t0;t1=ACC.t1;
   }
-  const minA=c.minA,maxA=c.maxA,spanT=(t1-t0)||1;
+  const minA=c.minA,maxA=c.maxA,nA=c.byAddl.size,spanT=(t1-t0)||1;
   const X=cyc=>plotX+(cyc-t0)/spanT*plotW;
   const addrs=[...c.byAddl.keys()].sort((a,b)=>(parseInt(a,16)||0)-(parseInt(b,16)||0));
   const rowOf=new Map();addrs.forEach((a,k)=>rowOf.set(a,k));
-  const nA=addrs.length,rowH=nA>0?plotH/nA:plotH;
-  const Yaddl=a=>maxA===minA?plotY+plotH/2:plotY+(a-minA)/(maxA-minA)*plotH;
-  const Yrow=k=>plotY+(k+0.5)*rowH;
+  // 纵轴可见范围（Shift+滚轮缩放）；未设置时回退全范围
+  if(!(isFinite(ACC.y0)&&isFinite(ACC.y1)&&ACC.y1>ACC.y0)){
+    if(ACC.axis==='row'){ACC.y0=0;ACC.y1=nA;} else {ACC.y0=minA;ACC.y1=maxA;}
+  }
+  const y0=ACC.y0,y1=ACC.y1,spanY=(y1-y0)||1,rowH=nA>0?plotH/nA:plotH;
+  const Yaddl=a=>plotY+(a-y0)/spanY*plotH;
+  const Yrow=k=>plotY+(k+0.5-y0)/spanY*plotH;
   // y 网格（数值地址模式）
   if(ACC.axis!=='row'){
     cx.strokeStyle=C.line;cx.globalAlpha=.5;cx.beginPath();
@@ -2531,10 +2706,10 @@ function accDrawAtime(C,c){
   // y 轴刻度
   cx.textAlign='right';cx.fillStyle=C.fg3;
   if(ACC.axis!=='row'){
-    for(let q=0;q<=4;q++){const a=maxA-(maxA-minA)*q/4;cx.fillText('0x'+(a>>>0).toString(16),plotX-6,plotY+plotH*q/4+3);}
+    for(let q=0;q<=4;q++){const a=y1-(y1-y0)*q/4;cx.fillText('0x'+(a>>>0).toString(16),plotX-6,plotY+plotH*q/4+3);}
   }else{
-    const stepR=Math.max(1,Math.floor(nA/14));
-    for(let k=0;k<nA;k+=stepR)cx.fillText('0x'+addrs[k],plotX-6,plotY+(k+0.5)*rowH+3);
+    const stepR=Math.max(1,Math.floor((y1-y0)/14));
+    for(let k=Math.ceil(y0);k<y1;k+=stepR){ if(k<0||k>=nA)continue; cx.fillText('0x'+addrs[k],plotX-6,plotY+(k+0.5-y0)/spanY*plotH+3);}
   }
   // 数据点
   ACC.points=[];const grid=new Map();const cell=9;
@@ -2590,8 +2765,8 @@ function accDrawAtime(C,c){
   cx.save();cx.translate(14,plotY+plotH/2);cx.rotate(-Math.PI/2);cx.textAlign='center';
   cx.fillText(ACC.axis==='row'?'缓存行（按地址排序，每行一个）':'缓存行地址（ADDL）',0,0);cx.restore();
   $('accHint').textContent=ACC.axis==='row'
-    ? '每行为一个缓存行，点在行内水平位置即访问时刻 · 单击定位 · 双击复位'
-    : '每个点为一次含 ADDL 的事件，纵轴为缓存行地址 · 滚轮缩放 · 拖拽平移 · 单击定位 · 双击复位';
+    ? '每行为一个缓存行，点在行内水平位置即访问时刻 · 单击定位 · 双击复位（Shift+滚轮缩放纵轴）'
+    : '每个点为一次含 ADDL 的事件，纵轴为缓存行地址 · 滚轮缩放时间 · Shift+滚轮缩放纵轴 · 拖拽平移 · 单击定位 · 双击复位';
 }
 
 /* ---- 子视图 2：地址热点 Top-N ---- */
@@ -2851,6 +3026,16 @@ function bind(){
 
   /* ---- 关于 / 开发报告 / 更新记录 ---- */
   const CHANGELOG=[
+    {v:'0.06',date:'2025-08-07',items:[
+      '【对比移植】实现正确的 RTL 仿真未定义态 (x/z) 检测器 isXZ()：先剥离 0x 前缀与下划线，再判断余下字符是否全为 x/z',
+      '修正另一 AI 的 /[xXzZ]/ 误判 Bug（会把十六进制 "0x1234" 的前缀 x 误标成未定义态）',
+      '统计页新增 x/z 概览卡片（红色告警）、字段级明细面板、跳转到首个 x 态事件按钮',
+      '详情面板对含未定义态的字段自动标红并显示告警条；x 态值不参与十进制/位域渲染',
+      '【对比移植】AXI/ACE 协议标准解码：BURS/DOMA/LOCK/BARR 静态映射 + SIZE/LENG/CACH/PROT 计算型解码',
+      'BIU_PAD_AR/AW 的 SIZE 自动显示"字节/拍"，LENG 显示"拍突发 · 共 N 字节"，CACH 展开四属性，PROT 三属性',
+      '【对比移植】预取覆盖率 vs 评估窗口曲线（SVG 内联）：12 个窗口采样点（16~32768 cyc 对数刻度），覆盖率上界参考线，当前阈值标记',
+      '新增 tlFocus(cyc) 辅助函数：把时序图居中到指定周期（默认跨度 ≤4000 cyc），用于 x 态事件跳转'
+    ]},
     {v:'0.05.2',date:'2025-08-06',items:[
       '修复 v0.04 引入的回归：缩略图初始化 miniInit() 中读取 localStorage.tpv_mini 未加保护',
       '在预览/内嵌的 opaque-origin sandbox（sandbox="allow-scripts" 无 allow-same-origin）中，localStorage 访问会抛 SecurityError',
@@ -2909,7 +3094,7 @@ function bind(){
   function renderAbout(){
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.05.2</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
@@ -2979,7 +3164,7 @@ function bind(){
   $('pvRowDn').onclick=()=>{PV.rowH=Math.max(8,PV.rowH-3);pvDraw();};
   $('tbCols').onchange=tbRender;
   $('accView').onchange=()=>{ACC.view=$('accView').value;ACC.hover=null;accRender();miniMount();};
-  $('accAxis').onchange=()=>{ACC.axis=$('accAxis').checked?'row':'num';ACC.hover=null;accRender();};
+  $('accAxis').onchange=()=>{ACC.axis=$('accAxis').checked?'row':'num';ACC.hover=null;ACC.y0=NaN;ACC.y1=NaN;accRender();};
   $('accK').onchange=()=>{ACC.k=Math.max(5,Math.min(300,parseInt($('accK').value)||40));accRender();};
 
   window.addEventListener('keydown',e=>{
