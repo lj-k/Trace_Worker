@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06.1</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06">
+<meta name="version" content="0.06.1">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -220,6 +220,12 @@ table.st td.num{text-align:right}
 .fmt{text-align:left;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin-top:18px;font-family:var(--mono);font-size:10.5px;color:var(--fg2);line-height:1.75;overflow-x:auto;white-space:pre}
 #prog{display:none;margin-top:20px}
 #prog.on{display:block}
+#loadErr{display:none;margin-top:16px;padding:13px 15px;border-radius:8px;text-align:left;font-size:12px;line-height:1.75}
+#loadErr.on{display:block}
+#loadErr.err{background:rgba(255,95,109,.12);border:1px solid #7f2d2d;color:#ff8a92}
+#loadErr.warn{background:rgba(240,160,60,.12);border:1px solid #7a5520;color:#f0a03c}
+#loadErr b{color:var(--fg)}
+#loadErr code{background:var(--bg3);padding:1px 5px;border-radius:3px;font-family:var(--mono)}
 .pbar{height:5px;background:var(--bg4);border-radius:3px;overflow:hidden}
 .pbar i{display:block;height:100%;background:var(--acc);width:0;transition:width .12s}
 #ptext{margin-top:8px;font-size:11.5px;color:var(--fg2);font-family:var(--mono)}
@@ -261,7 +267,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06 · 作者 konglingjun">v0.06</span></div>
+    <span class="ver" id="verTag" title="版本 0.06.1 · 作者 konglingjun">v0.06.1</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -506,6 +512,7 @@ table.st td.num{text-align:right}
 
 内置 openC910 / Triverse 预取器语义，其余事件类型自动泛化处理。</div>
         <div id="prog"><div class="pbar"><i id="pbarI"></i></div><div id="ptext">准备中…</div></div>
+        <div id="loadErr"></div>
       </div>
     </div>
 
@@ -2927,14 +2934,36 @@ function loadText(txt){
   }
 }
 function onLoaded(bad){
+  const eb=$('loadErr');
+  /* 一条都没解析出来：保持加载页可见并给出定位提示，而不是把用户丢进一个空白视图。
+     这类情况几乎都是格式不匹配（分隔符/字段写法不同），必须说清楚期望格式。 */
+  if(!S.raw.length){
+    $('prog').classList.remove('on');
+    eb.className='on err';
+    eb.innerHTML='<b>⚠ 未解析到任何有效记录</b><br>'
+      +'文件已读取'+(bad?('，其中 <b>'+fmt(bad)+'</b> 行无法识别'):'，但内容为空或全是空白/注释行')+'。<br><br>'
+      +'每行需要形如 <code>&lt;TIME&gt;;&lt;TAG&gt;;KEY:VALUE;…</code>，至少包含时间戳与事件类型两段，'
+      +'且时间戳必须是数字。以 <code>#</code> 或 <code>/</code> 开头的行会被当作注释跳过。<br>'
+      +'如果你的 trace 用的是别的分隔符，请先转换成分号分隔再加载。';
+    msg('未解析到有效记录，请检查文件格式');
+    return;
+  }
   $('sTotal').textContent=fmt(S.raw.length);
   $('sTags').textContent=S.tags.length;
   $('sSpan').textContent=fmt(S.maxCyc-S.minCyc);
+  eb.className='';eb.innerHTML='';
   $('loader').classList.add('hide');
   refreshTags();
   applyFilter();
   tlResize();tlFit();
-  msg('已加载 '+fmt(S.raw.length)+' 条事件'+(bad?('，跳过 '+bad+' 行无法解析'):''));
+  /* 跳过比例过高时单独提醒：解析"成功"但丢了三成数据，比直接失败更容易被忽略。 */
+  const ratio=bad/(bad+S.raw.length);
+  if(bad&&ratio>0.3){
+    msg('⚠ 已加载 '+fmt(S.raw.length)+' 条事件，但跳过了 '+fmt(bad)+' 行（占 '
+      +(ratio*100).toFixed(0)+'%），请确认文件格式是否一致');
+  }else{
+    msg('已加载 '+fmt(S.raw.length)+' 条事件'+(bad?('，跳过 '+bad+' 行无法解析'):''));
+  }
 }
 
 /* =======================================================================
@@ -3026,6 +3055,15 @@ function bind(){
 
   /* ---- 关于 / 开发报告 / 更新记录 ---- */
   const CHANGELOG=[
+    {v:'0.06.1',date:'2025-08-07',items:[
+      '修复快捷键健壮性缺陷：keydown 处理器直接调用 e.target.matches()，当事件派发到 window/document（非 Element）时抛 TypeError，导致全部快捷键失效',
+      '过滤条件同时扩展到 select 与 contenteditable，避免在下拉框/可编辑区误触发快捷键',
+      '新增 ↑/↓ 快捷键：在同一缓存行的访问序列中前后跳转，越界时给出提示；事件不在当前时间窗内会自动居中',
+      '空文件 / 无有效记录不再静默进入空白界面：保持加载页并显示醒目错误块，说明期望格式与注释行规则',
+      '无效行占比超过 30% 时，在状态栏发出格式一致性警告（此前只在末尾附一句，容易被忽略）',
+      '「关于」弹窗新增完整的键盘与鼠标操作速查表',
+      '新增 16 个边界 trace 的健壮性回归（空/空白/单行/同时间戳/乱序/缺字段/重复键/稀疏/乱码/超大数值/超大时间/x-z/缺PC/CRLF/无分号/万字段长行）'
+    ]},
     {v:'0.06',date:'2025-08-07',items:[
       '【对比移植】实现正确的 RTL 仿真未定义态 (x/z) 检测器 isXZ()：先剥离 0x 前缀与下划线，再判断余下字符是否全为 x/z',
       '修正另一 AI 的 /[xXzZ]/ 误判 Bug（会把十六进制 "0x1234" 的前缀 x 误标成未定义态）',
@@ -3094,7 +3132,7 @@ function bind(){
   function renderAbout(){
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06.1</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
@@ -3110,6 +3148,18 @@ function bind(){
     h+='<h4>数据格式</h4>'
       +'<p>每行一条记录，分号分隔的 KV 结构：<code>&lt;TIME&gt;; &lt;TAG&gt;; KEY:VALUE; ...</code>。'
       +'解析时以 1 周期 = 100000 时间单位（可改）归一化，并按 ADDL 建立缓存行索引。</p>';
+    h+='<h4>键盘与鼠标</h4><table class="verrow"><thead><tr><th style="width:130px">操作</th><th>效果</th></tr></thead><tbody>'
+      +'<tr><td><code>1</code> – <code>6</code></td><td>切换视图：时序泳道 / 流水线 / 事件表 / 统计 / 字典 / 访存分析</td></tr>'
+      +'<tr><td><code>F</code></td><td>时序图适应全部可见事件</td></tr>'
+      +'<tr><td><code>Esc</code></td><td>关闭详情面板并清除选中与高亮</td></tr>'
+      +'<tr><td><code>←</code> / <code>→</code></td><td>时序图沿时间轴平移（每次 15% 窗口宽）</td></tr>'
+      +'<tr><td><code>↑</code> / <code>↓</code></td><td>在<b>同一缓存行</b>的访问序列中前后跳转；无 ADDL 时按可见事件顺序移动</td></tr>'
+      +'<tr><td>滚轮</td><td>缩放时间轴（横向）</td></tr>'
+      +'<tr><td><b>Shift</b> + 滚轮</td><td>缩放纵轴：时序图泳道高度 / 流水线行高 / 访存图地址范围</td></tr>'
+      +'<tr><td><b>Ctrl</b> + 滚轮</td><td>流水线视图缩放时间轴</td></tr>'
+      +'<tr><td>拖拽</td><td>平移视图；在缩略图空白处拖拽可直接框选时间窗口</td></tr>'
+      +'<tr><td>双击</td><td>复位当前视图的缩放</td></tr>'
+      +'</tbody></table>';
     h+='<h4>更新记录</h4><table class="verrow"><thead><tr><th>版本</th><th>日期</th><th>变更</th></tr></thead><tbody>';
     for(const c of CHANGELOG){
       h+='<tr class="verrow"><td>v'+c.v+'</td><td>'+c.date+'</td><td><ul style="margin:2px 0">'
@@ -3168,7 +3218,10 @@ function bind(){
   $('accK').onchange=()=>{ACC.k=Math.max(5,Math.min(300,parseInt($('accK').value)||40));accRender();};
 
   window.addEventListener('keydown',e=>{
-    if(e.target.matches('input,textarea'))return;
+    /* e.target 不一定是 Element：事件直接派发到 window/document 时没有 matches()，
+       旧写法 e.target.matches(...) 会抛 TypeError 并让整个快捷键处理器失效。 */
+    const tg=e.target;
+    if(tg&&typeof tg.matches==='function'&&tg.matches('input,textarea,select,[contenteditable]'))return;
     if(e.key==='f'||e.key==='F'){tlFit();}
     if(e.key==='Escape'){$('detail').classList.remove('on');S.sel=-1;S.hlAddl=null;S.relSet=null;redraw();}
     if(e.key==='1')switchPane('timeline');
@@ -3180,6 +3233,24 @@ function bind(){
     if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
       const d=(TL.t1-TL.t0)*0.15*(e.key==='ArrowLeft'?-1:1);
       TL.t0+=d;TL.t1+=d;tlDraw();
+    }
+    /* ↑/↓：在「同一缓存行」的访问序列里前后跳转，用来顺着一条 line 的生命周期走查。
+       没选中事件或该事件无 ADDL 时，退化为在全部可见事件里按时间前后移动。 */
+    if(e.key==='ArrowUp'||e.key==='ArrowDown'){
+      e.preventDefault();
+      const dir=e.key==='ArrowUp'?-1:1;
+      if(S.sel<0){if(S.visIdx.length)selectEvent(S.visIdx[dir>0?0:S.visIdx.length-1],true);return;}
+      const a=S.raw[S.sel].d.ADDL;
+      const seq=(a!==undefined&&S.byAddl.get(a))||S.visIdx;
+      const at=seq.indexOf(S.sel);
+      if(at<0){selectEvent(seq[0],true);return;}
+      const nx=at+dir;
+      if(nx<0||nx>=seq.length){
+        msg(dir<0?'已经是该缓存行的第一个事件':'已经是该缓存行的最后一个事件');return;
+      }
+      const j=seq[nx];
+      if(S.pane==='timeline'&&(S.raw[j].cyc<TL.t0||S.raw[j].cyc>TL.t1))tlFocus(S.raw[j].cyc);
+      selectEvent(j,true);
     }
   });
   window.addEventListener('resize',()=>{tlResize();pvResize();accResize();redraw();});
