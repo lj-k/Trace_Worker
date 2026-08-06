@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06.2</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06.3</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06.2">
+<meta name="version" content="0.06.3">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -267,7 +267,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06.2 · 作者 konglingjun">v0.06.2</span></div>
+    <span class="ver" id="verTag" title="版本 0.06.3 · 作者 konglingjun">v0.06.3</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -3133,6 +3133,12 @@ function bind(){
       '侧栏「关联窗口」新增「冗余预取判定窗口（缓存驻留）」输入框，可调整后点「重算事务链路」即时重算',
       '【预防性修复】将所有 Math.max(...arr)/Math.min(...arr) 展开调用改为循环实现的 maxOf()/minOf() 助手：数组超过约 12 万个元素时 spread 会触发 RangeError 栈溢出（另一 AI 的 core.js 文档也提及此坑却仍在 core.js:339 提交了该写法）'
     ]},
+    {v:'0.06.3',date:'2025-08-07',items:[
+      '【对比审查收尾】完成另一 AI（memtrace v1.1.0）views.js（808 行）逐行复查，连同此前 core.js（719 行）构成完整对照',
+      '复查结论：本工具在 X/Z 未定义态、冗余预取口径、Math.max 栈溢出预防、缩放轴跨度钳制（map 视图纵轴 / timeline 横轴均已钳制，无除零 NaN）、字段谓词过滤器（= != ~ > < >= <= + 周期区间 + PC/ADDL/IID/全文，超集于对方）六个维度均已达标或更优',
+      '另一 AI 仍存在的缺陷（RE_XZ 误判、冗余预取无时间窗口、map 纵轴缩放未钳制、Math.max 展开）本工具均不涉及',
+      '新增 test_filter.mjs（11 断言）：锁定字段谓词过滤器正确性——READY=0 仅留反压预取、STAL!=0 仅留 L2 stall、多谓词 AND 语义、非法数值不崩溃、清空恢复全量'
+    ]},
     {v:'0.06.1',date:'2025-08-07',items:[
       '修复快捷键健壮性缺陷：keydown 处理器直接调用 e.target.matches()，当事件派发到 window/document（非 Element）时抛 TypeError，导致全部快捷键失效',
       '过滤条件同时扩展到 select 与 contenteditable，避免在下拉框/可编辑区误触发快捷键',
@@ -3210,7 +3216,7 @@ function bind(){
   function renderAbout(){
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06.2</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06.3</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
