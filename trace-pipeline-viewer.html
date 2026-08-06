@@ -1,0 +1,3011 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CPU 访存 Trace 流水线分析器 v0.05.2</title>
+<meta name="author" content="konglingjun">
+<meta name="version" content="0.05.2">
+<!-- ============================================================
+     CPU 访存 Trace 流水线分析器
+     Version : 0.04
+     Author  : konglingjun
+     更新历史见《更新记录.md》，开发说明见《开发报告.md》
+     ============================================================ -->
+<script>
+/* 在样式生效前应用持久化的主题，避免首屏闪烁 */
+(function(){try{var t=localStorage.getItem('tpv_theme');if(t==='dark'||t==='light'||t==='sepia')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();
+</script>
+<style>
+/* ============ 主题变量 ============ */
+/* ---- 深色（默认） ---- */
+:root,html[data-theme="dark"]{
+  --bg:#0e1116; --bg2:#151a21; --bg3:#1c232c; --bg4:#232c37;
+  --line:#2a3441; --line2:#37434f;
+  --fg:#dfe6ee; --fg2:#9aa8b8; --fg3:#6b7889;
+  --acc:#4ea1ff; --acc2:#35c4dc;
+  --ok:#52d38a; --warn:#f0a03c; --err:#ff5f6d;
+  --rel:#ff4d9d;                      /* 关联高亮（同PC/同ADDL连线） */
+  --accSoft:rgba(78,161,255,.14); --accLine:rgba(78,161,255,.38);
+  --rowHi:rgba(78,161,255,.17);     /* 选中行底色 */
+  --markHi:#ffffff;                 /* 画布上的强调描边 */
+  --barTrack:#232c37;
+  --onBar:rgba(0,0,0,.68);          /* 画在彩色块上的文字 */
+  --navFill:rgba(255,255,255,.10);
+  --shadow:rgba(0,0,0,.5);
+  --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,'Courier New',monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+}
+/* ---- 白色 ---- */
+html[data-theme="light"]{
+  --bg:#f6f8fa; --bg2:#ffffff; --bg3:#eef2f6; --bg4:#e2e8f0;
+  --line:#d6dee7; --line2:#b9c5d3;
+  --fg:#1b2430; --fg2:#4d5c72; --fg3:#7c8b9f;
+  --acc:#0b6cd4; --acc2:#0a7f96;
+  --ok:#0f7a48; --warn:#a35c07; --err:#c8232f;
+  --rel:#d61f7a;
+  --accSoft:rgba(11,108,212,.10); --accLine:rgba(11,108,212,.34);
+  --rowHi:rgba(11,108,212,.13);
+  --markHi:#0b1420;
+  --barTrack:#dde5ee;
+  --onBar:rgba(255,255,255,.96);
+  --navFill:rgba(11,108,212,.10);
+  --shadow:rgba(90,110,140,.24);
+}
+/* ---- 米色（护眼纸质） ---- */
+html[data-theme="sepia"]{
+  --bg:#f2e9d8; --bg2:#faf4e6; --bg3:#ebe0ca; --bg4:#ded1b6;
+  --line:#d8c9ab; --line2:#c3b08c;
+  --fg:#3a2f21; --fg2:#6b5b45; --fg3:#94836a;
+  --acc:#a8611b; --acc2:#7a6320;
+  --ok:#4f7a25; --warn:#b0700c; --err:#b3392b;
+  --rel:#b5347a;
+  --accSoft:rgba(168,97,27,.12); --accLine:rgba(168,97,27,.36);
+  --rowHi:rgba(168,97,27,.16);
+  --markHi:#3a2f21;
+  --barTrack:#ded1b6;
+  --onBar:rgba(255,252,244,.96);
+  --navFill:rgba(168,97,27,.13);
+  --shadow:rgba(120,100,70,.26);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:13px;overflow:hidden;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+/* 隐藏但可被 .click() 可靠触发（display:none 在部分浏览器/内嵌环境中会拦截文件对话框） */
+.hideinput{position:absolute;left:-9999px;top:0;width:1px;height:1px;opacity:0;border:0;padding:0;margin:0}
+.pastebox{margin-top:16px;max-width:560px;width:100%}
+.pastebox .pbhead{font-size:11px;color:var(--fg3);line-height:1.6;margin-bottom:8px}
+.pastebox .pbhead b{color:var(--rel)}
+.pastebox textarea.inp{width:100%;min-height:70px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-family:var(--mono);font-size:11px;line-height:1.5}
+.btn.ghost{background:transparent;border:1px solid var(--line2);color:var(--fg2)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--line2);border-radius:5px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:var(--fg3)}
+
+/* ============ 布局 ============ */
+#app{display:flex;flex-direction:column;height:100vh}
+header{display:flex;align-items:center;gap:10px;padding:0 12px;height:46px;background:var(--bg2);border-bottom:1px solid var(--line);flex:none;position:relative;z-index:60}
+.logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;letter-spacing:.3px;white-space:nowrap}
+.logo .dot{width:9px;height:9px;border-radius:2px;background:var(--acc);box-shadow:0 0 8px var(--acc)}
+.logo .ver{font-size:10px;font-weight:600;font-family:var(--mono);color:var(--acc);background:var(--accSoft);
+  border:1px solid var(--accLine);border-radius:9px;padding:1px 6px;letter-spacing:0}
+.hsep{width:1px;height:22px;background:var(--line);flex:none}
+.spacer{flex:1}
+
+.btn{background:var(--bg3);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap;transition:.12s;display:inline-flex;align-items:center;gap:5px}
+.btn:hover{background:var(--bg4);border-color:var(--line2)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:var(--onBar);font-weight:600}
+.btn.primary:hover{filter:brightness(1.12)}
+.btn.sm{padding:3px 7px;font-size:11px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.icon{padding:5px 8px}
+
+.tabs{display:flex;gap:2px;background:var(--bg3);padding:3px;border-radius:8px;border:1px solid var(--line)}
+.tab{padding:5px 13px;border-radius:6px;cursor:pointer;color:var(--fg2);white-space:nowrap;transition:.12s;user-select:none;font-size:12.5px}
+.tab:hover{color:var(--fg);background:var(--bg4)}
+.tab.on{background:var(--acc);color:var(--onBar);font-weight:600}
+
+main{flex:1;display:flex;min-height:0}
+aside{width:264px;flex:none;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden}
+aside.collapsed{width:0;border:none;overflow:hidden}
+#stage{flex:1;min-width:0;position:relative;display:flex;flex-direction:column}
+.pane{position:absolute;inset:0;display:none;flex-direction:column;min-height:0}
+.pane.on{display:flex}
+
+/* 侧栏 */
+.sec{border-bottom:1px solid var(--line)}
+.sec>h3{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--fg3);padding:9px 12px 7px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.sec>h3:hover{color:var(--fg2)}
+.sec>h3 .cv{transition:.15s;font-size:9px}
+.sec.closed .cv{transform:rotate(-90deg)}
+.sec.closed .secbody{display:none}
+.secbody{padding:0 12px 11px}
+.field{margin-bottom:8px}
+.field label{display:block;font-size:11px;color:var(--fg2);margin-bottom:3px}
+.inp{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:5px 7px;font-family:var(--mono);font-size:11.5px;outline:none}
+.inp:focus{border-color:var(--acc)}
+.inp::placeholder{color:var(--fg3)}
+textarea.inp{resize:vertical;min-height:54px;line-height:1.45}
+
+.tagrow{display:flex;align-items:center;gap:7px;padding:3px 4px;border-radius:4px;cursor:pointer;user-select:none}
+.tagrow:hover{background:var(--bg3)}
+.tagrow input{accent-color:var(--acc);cursor:pointer;flex:none}
+.swatch{width:10px;height:10px;border-radius:2px;flex:none}
+.tagrow .nm{flex:1;font-family:var(--mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tagrow .ct{font-size:10px;color:var(--fg3);font-variant-numeric:tabular-nums}
+
+/* 状态栏 */
+footer{height:26px;flex:none;background:var(--bg2);border-top:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 12px;font-size:11px;color:var(--fg2);font-variant-numeric:tabular-nums}
+footer b{color:var(--fg);font-weight:600}
+
+/* 画布区 */
+.canvaswrap{flex:1;position:relative;min-height:0;overflow:hidden}
+canvas{display:block;position:absolute;inset:0;width:100%;height:100%}
+/* 时间轴缩略图（minimap）：作为 .pane 的 flex 子节点，位于主视图上/下方 */
+#miniWrap{flex:none;height:48px;position:relative;background:var(--bg2);cursor:crosshair;user-select:none;overflow:hidden}
+#miniWrap.top{border-bottom:1px solid var(--line2)}
+#miniWrap:not(.top){border-top:1px solid var(--line2)}
+#miniCanvas{display:block;position:absolute;inset:0;width:100%;height:100%}
+.toolstrip{height:34px;flex:none;display:flex;align-items:center;gap:8px;padding:0 10px;background:var(--bg2);border-bottom:1px solid var(--line);font-size:11.5px;color:var(--fg2);overflow-x:auto}
+.toolstrip .g{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.chip{background:var(--bg3);border:1px solid var(--line);border-radius:11px;padding:2px 9px;font-family:var(--mono);font-size:10.5px}
+
+/* 悬浮提示 */
+#tip{position:fixed;z-index:200;background:var(--bg2);border:1px solid var(--line2);border-radius:7px;padding:8px 10px;font-family:var(--mono);font-size:11px;line-height:1.6;pointer-events:none;display:none;max-width:440px;box-shadow:0 10px 34px var(--shadow)}
+#tip .t{color:var(--acc);font-weight:700;margin-bottom:4px;font-family:var(--sans)}
+#tip .kv{color:var(--fg2)}
+#tip .kv b{color:var(--fg);font-weight:600}
+
+/* 详情抽屉 */
+#detail{position:absolute;top:0;right:0;bottom:0;width:352px;background:var(--bg2);border-left:1px solid var(--line);z-index:20;display:none;flex-direction:column;box-shadow:-8px 0 26px var(--shadow)}
+#detail.on{display:flex}
+#detail .dh{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
+#detail .dh h4{font-size:13px}
+#detail .db{flex:1;overflow-y:auto;padding:10px 12px}
+.dtable{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}
+.dtable td{padding:3px 5px;border-bottom:1px solid var(--line);vertical-align:top}
+.dtable td:first-child{color:var(--fg2);white-space:nowrap;width:76px}
+.dtable td:last-child{word-break:break-all}
+.dsec{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--fg3);margin:13px 0 5px;padding-bottom:3px;border-bottom:1px solid var(--line)}
+.dsec:first-child{margin-top:0}
+.bits{display:flex;gap:2px;flex-wrap:wrap;margin-top:3px}
+.bit{width:17px;height:19px;display:flex;align-items:center;justify-content:center;border-radius:3px;font-family:var(--mono);font-size:10px;border:1px solid var(--line)}
+.bit.one{background:var(--acc);color:var(--onBar);border-color:var(--acc);font-weight:700}
+.bit.zero{background:var(--bg3);color:var(--fg3)}
+.rel{display:block;width:100%;text-align:left;background:var(--bg3);border:1px solid var(--line);border-radius:5px;padding:4px 7px;margin-bottom:3px;cursor:pointer;font-family:var(--mono);font-size:10.5px}
+.rel:hover{background:var(--bg4);border-color:var(--acc)}
+
+/* 表格 */
+.vt{flex:1;overflow:auto;position:relative}
+.vthead{position:sticky;top:0;z-index:5;background:var(--bg3);display:flex;border-bottom:1px solid var(--line2);font-size:11px;font-weight:600;color:var(--fg2)}
+.vthead div{padding:6px 8px;border-right:1px solid var(--line);white-space:nowrap;overflow:hidden;flex:none}
+.vtbody{position:relative}
+.vtrow{position:absolute;left:0;right:0;display:flex;font-family:var(--mono);font-size:11px;border-bottom:1px solid var(--line);cursor:pointer;align-items:center}
+.vtrow:hover{background:var(--bg3)}
+.vtrow.sel{background:var(--rowHi);box-shadow:inset 2px 0 0 var(--acc)}
+.vtrow div{padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none;line-height:23px}
+
+/* 统计 */
+.stats{flex:1;overflow-y:auto;padding:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:9px;margin-bottom:16px}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:9px;padding:11px 13px}
+.card .lb{font-size:10.5px;color:var(--fg3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:5px}
+.card .vl{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;font-family:var(--mono)}
+.card .sb{font-size:10.5px;color:var(--fg2);margin-top:3px}
+.panel{background:var(--bg2);border:1px solid var(--line);border-radius:9px;padding:13px;margin-bottom:14px}
+.panel h4{font-size:12.5px;margin-bottom:11px;display:flex;align-items:center;gap:7px}
+.panel h4::before{content:'';width:3px;height:13px;background:var(--acc);border-radius:2px}
+.panel .hint{font-size:11px;color:var(--fg3);margin:-6px 0 10px;line-height:1.55}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:1180px){.grid2{grid-template-columns:1fr}}
+table.st{width:100%;border-collapse:collapse;font-size:11.5px}
+table.st th{text-align:left;padding:5px 7px;border-bottom:1px solid var(--line2);color:var(--fg2);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px}
+table.st td{padding:4px 7px;border-bottom:1px solid var(--line);font-family:var(--mono);font-variant-numeric:tabular-nums}
+table.st tr:hover td{background:var(--bg3)}
+table.st td.num{text-align:right}
+.bar{height:7px;background:var(--barTrack);border-radius:4px;overflow:hidden;min-width:44px}
+.bar i{display:block;height:100%;background:var(--acc);border-radius:4px}
+
+/* 加载页 */
+#loader{position:absolute;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:22px}
+#loader.hide{display:none}
+.drop{width:min(760px,100%);border:2px dashed var(--line2);border-radius:15px;padding:38px 34px;text-align:center;transition:.15s;background:var(--bg2)}
+.drop.over{border-color:var(--acc);background:var(--accSoft)}
+.drop h2{font-size:19px;margin-bottom:8px}
+.drop p{color:var(--fg2);margin-bottom:18px;line-height:1.65;font-size:12.5px}
+.drop code{background:var(--bg3);padding:1px 5px;border-radius:3px;font-family:var(--mono);font-size:11px;color:var(--acc2)}
+.fmt{text-align:left;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin-top:18px;font-family:var(--mono);font-size:10.5px;color:var(--fg2);line-height:1.75;overflow-x:auto;white-space:pre}
+#prog{display:none;margin-top:20px}
+#prog.on{display:block}
+.pbar{height:5px;background:var(--bg4);border-radius:3px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--acc);width:0;transition:width .12s}
+#ptext{margin-top:8px;font-size:11.5px;color:var(--fg2);font-family:var(--mono)}
+
+/* 字典编辑 */
+.dictwrap{flex:1;overflow-y:auto;padding:14px}
+.kvedit{display:grid;grid-template-columns:150px 1fr 92px;gap:6px;margin-bottom:5px;align-items:center}
+.kvedit code{font-family:var(--mono);font-size:11px;color:var(--acc2);overflow:hidden;text-overflow:ellipsis}
+.note{background:color-mix(in srgb,var(--warn) 11%,transparent);border:1px solid color-mix(in srgb,var(--warn) 36%,transparent);border-radius:7px;padding:9px 11px;font-size:11.5px;color:var(--fg2);line-height:1.65;margin-bottom:13px}
+.note b{color:var(--warn)}
+.legend{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:11px}
+.lgi{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--fg2)}
+.lgi i{width:11px;height:11px;border-radius:2px;display:block}
+.empty{padding:44px;text-align:center;color:var(--fg3);font-size:12.5px;line-height:1.8}
+.sw{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;white-space:nowrap}
+.sw input{accent-color:var(--acc);cursor:pointer}
+
+/* 弹窗（关于 / 开发报告） */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:50}
+.modal.on{display:flex}
+.modalbox{background:var(--bg2);border:1px solid var(--line);border-radius:10px;width:min(880px,92vw);max-height:86vh;display:flex;flex-direction:column;box-shadow:0 14px 50px var(--shadow)}
+.modalhead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13.5px}
+.modalbody{padding:16px 18px;overflow-y:auto;line-height:1.75;font-size:12.5px;color:var(--fg2)}
+.modalbody h4{color:var(--fg);font-size:13px;margin:16px 0 7px;border-left:3px solid var(--acc);padding-left:8px}
+.modalbody h4:first-child{margin-top:2px}
+.modalbody h5{color:var(--acc2);font-size:12px;margin:12px 0 5px}
+.modalbody ul{margin:4px 0 4px 20px}
+.modalbody li{margin:3px 0}
+.modalbody code{font-family:var(--mono);font-size:11.5px;background:var(--bg3);color:var(--acc2);padding:1px 5px;border-radius:4px}
+.modalbody table{width:100%;border-collapse:collapse;margin:6px 0;font-size:11.5px}
+.modalbody th,.modalbody td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+.modalbody th{background:var(--bg3);color:var(--fg)}
+.modalbody .verrow td:first-child{color:var(--acc);font-family:var(--mono);white-space:nowrap;font-weight:700}
+.modalbody a{color:var(--acc)}
+</style>
+</head>
+<body>
+<div id="app">
+
+<header>
+  <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
+    <span class="ver" id="verTag" title="版本 0.05.2 · 作者 konglingjun">v0.05.2</span></div>
+  <div class="hsep"></div>
+  <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
+  <button class="btn" id="btnOpen">📂 打开 Trace</button>
+  <div class="hsep"></div>
+  <div class="tabs" id="tabs">
+    <div class="tab on" data-p="timeline">时序泳道</div>
+    <div class="tab" data-p="pipeline">流水线事务</div>
+    <div class="tab" data-p="table">事件表</div>
+    <div class="tab" data-p="stats">统计分析</div>
+    <div class="tab" data-p="access">访存分析</div>
+    <div class="tab" data-p="dict">语义字典</div>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn sm" id="btnCsv" title="导出当前过滤结果为 CSV">⬇ CSV</button>
+  <button class="btn sm" id="btnPng" title="导出当前视图为 PNG">⬇ PNG</button>
+  <button class="btn sm" id="btnTheme" title="切换主题（深色/浅色/米色）">◐</button>
+  <button class="btn sm" id="btnMini" title="时间轴缩略图位置：上方 / 下方 / 关闭">🗺↓</button>
+  <button class="btn sm" id="btnAbout" title="关于本工具 / 开发报告 / 更新记录">ⓘ</button>
+</header>
+
+<!-- 关于 / 开发报告弹窗 -->
+<div class="modal" id="aboutModal">
+  <div class="modalbox">
+    <div class="modalhead">
+      <span>关于 · 开发报告与更新记录</span>
+      <button class="btn sm" id="aboutClose">✕</button>
+    </div>
+    <div class="modalbody" id="aboutBody"></div>
+  </div>
+</div>
+
+<main>
+  <aside id="side">
+    <div class="sec">
+      <h3>事件类型 <span><button class="btn sm" id="tagAll">全选</button> <button class="btn sm" id="tagNone">清空</button></span></h3>
+      <div class="secbody" id="tagList"></div>
+    </div>
+    <div class="sec">
+      <h3><span>快速过滤 <span class="cv">▼</span></span></h3>
+      <div class="secbody">
+        <div class="field"><label>PC（子串，逗号分隔多个）</label><input class="inp" id="fPc" placeholder="1ea8, 1e88"></div>
+        <div class="field"><label>缓存行 ADDL（子串）</label><input class="inp" id="fAddl" placeholder="00000ede"></div>
+        <div class="field"><label>指令 ID / IID</label><input class="inp" id="fIid" placeholder="1f"></div>
+        <div class="field"><label>全文搜索（任意字段）</label><input class="inp" id="fText" placeholder="任意关键字"></div>
+      </div>
+    </div>
+    <div class="sec closed">
+      <h3><span>高级表达式 <span class="cv">▼</span></span></h3>
+      <div class="secbody">
+        <div class="field">
+          <label>字段条件（每行一条，AND 关系）</label>
+          <textarea class="inp" id="fExpr" placeholder="TYPE=0010&#10;WRIT=1&#10;STAL!=0&#10;READY=0"></textarea>
+        </div>
+        <div style="font-size:10.5px;color:var(--fg3);line-height:1.65">
+          支持 <code>=</code> <code>!=</code> <code>~</code>(包含) <code>&gt;</code> <code>&lt;</code>。<br>
+          数值比较自动按十六进制解析。<br>
+          示例：<code>ADDL&gt;00000ede00</code>
+        </div>
+      </div>
+    </div>
+    <div class="sec">
+      <h3><span>时间窗口（周期）<span class="cv">▼</span></span></h3>
+      <div class="secbody">
+        <div class="field"><label>起始周期</label><input class="inp" id="fT0" placeholder="0"></div>
+        <div class="field"><label>结束周期</label><input class="inp" id="fT1" placeholder="max"></div>
+        <button class="btn sm" id="btnFitWin" style="width:100%">应用并缩放到该窗口</button>
+      </div>
+    </div>
+    <div class="sec closed">
+      <h3><span>关联窗口（启发式）<span class="cv">▼</span></span></h3>
+      <div class="secbody">
+        <div style="font-size:10.5px;color:var(--fg3);line-height:1.6;margin-bottom:9px">
+          事务链路中除 IID 配对外，其余都靠「同 ADDL + 时间邻近」推断。
+          阈值直接影响统计结论，可在此校准。
+        </div>
+        <div class="field"><label>预取 → L2-CMP 窗口</label><input class="inp" id="wL2" value="80"></div>
+        <div class="field"><label>预取 → AXI-AR 窗口</label><input class="inp" id="wAr" value="4000"></div>
+        <div class="field"><label>预取「及时有用」提前量上限</label><input class="inp" id="wLead" value="4096"></div>
+        <div class="field"><label>Store → AW 窗口</label><input class="inp" id="wAw" value="500"></div>
+        <div class="field"><label>缓存行分段间隔</label><input class="inp" id="wGap" value="2000"></div>
+        <button class="btn primary sm" id="btnWin" style="width:100%">重算事务链路</button>
+      </div>
+    </div>
+    <div class="sec">
+      <h3><span>显示选项 <span class="cv">▼</span></span></h3>
+      <div class="secbody">
+        <label class="sw" style="margin-bottom:6px"><input type="checkbox" id="oLink" checked> 绘制 IID 流水线连线</label>
+        <label class="sw" style="margin-bottom:6px"><input type="checkbox" id="oAddr" checked> 高亮同缓存行事件</label>
+        <label class="sw" style="margin-bottom:6px"><input type="checkbox" id="oLabel" checked> 显示事件标签</label>
+        <label class="sw" style="margin-bottom:6px"><input type="checkbox" id="oGrid" checked> 显示周期网格</label>
+        <div class="field" style="margin-top:9px"><label>1 周期 = ? 时间单位</label><input class="inp" id="oCyc" value="100000"></div>
+        <div class="field" style="margin-top:12px"><label>关联高亮（点击某个事件后生效）</label>
+          <select class="inp" id="relMode" style="width:100%;padding:4px 6px">
+            <option value="none">关闭</option>
+            <option value="pc">同 PC</option>
+            <option value="addrl">同 ADDL（缓存行）</option>
+          </select>
+          <div style="font-size:10.5px;color:var(--fg3);line-height:1.6;margin-top:4px">
+            选中事件后，按所选维度高亮并连线所有相关事件（仅限当前可见事件）。
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="sec">
+      <h3><span>过滤结果 <span class="cv">▼</span></span></h3>
+      <div class="secbody" id="filtSum" style="font-family:var(--mono);font-size:11px;color:var(--fg2);line-height:1.9"></div>
+    </div>
+  </aside>
+
+  <div id="stage">
+
+    <!-- 时序泳道 -->
+    <div class="pane on" data-p="timeline">
+      <div class="toolstrip">
+        <div class="g"><button class="btn sm" id="tlFit">⤢ 全览</button><button class="btn sm" id="tlIn">＋</button><button class="btn sm" id="tlOut">－</button></div>
+        <div class="hsep"></div>
+        <div class="g">视窗 <span class="chip" id="tlRange">—</span></div>
+        <div class="g">宽度 <span class="chip" id="tlSpan">—</span></div>
+        <div class="g">绘制 <span class="chip" id="tlDrawn">—</span></div>
+        <div class="spacer"></div>
+        <div class="g" style="color:var(--fg3)">滚轮缩放 · 拖拽平移 · 单击查看 · 双击复位 · Shift+拖拽框选</div>
+      </div>
+      <div class="canvaswrap" id="tlWrap"><canvas id="tlCanvas"></canvas></div>
+    </div>
+
+    <!-- 流水线事务 -->
+    <div class="pane" data-p="pipeline">
+      <div class="toolstrip">
+        <div class="g">事务类型
+          <select class="inp" id="pvKind" style="width:auto;padding:3px 6px">
+            <option value="load">Load 指令流水线（PIPE3→DA→WB）</option>
+            <option value="prefetch">预取生命周期（PF→L2→AXI→被使用）</option>
+            <option value="line">缓存行生命周期（按 ADDL 聚合）</option>
+            <option value="store">Store 指令（ST_PIPE4→AXI AW）</option>
+          </select>
+        </div>
+        <div class="hsep"></div>
+        <div class="g">排序
+          <select class="inp" id="pvSort" style="width:auto;padding:3px 6px">
+            <option value="start">起始时间</option>
+            <option value="lat">总延迟（降序）</option>
+            <option value="addr">缓存行地址</option>
+          </select>
+        </div>
+        <div class="g"><label class="sw"><input type="checkbox" id="pvSlow"> 仅显示长延迟</label></div>
+        <div class="g" id="pvMergeWrap" style="display:none"><label class="sw" title="将该缓存行的所有事件合并到同一行显示"><input type="checkbox" id="pvMerge"> 同 ADDL 合并成一行</label></div>
+        <div class="hsep"></div>
+        <div class="g">事务数 <span class="chip" id="pvCount">—</span></div>
+        <div class="g">行高 <button class="btn sm" id="pvRowDn">－</button><button class="btn sm" id="pvRowUp">＋</button></div>
+        <div class="spacer"></div>
+        <div class="g" id="pvLegend" style="display:flex;gap:8px"></div>
+      </div>
+      <div class="canvaswrap" id="pvWrap"><canvas id="pvCanvas"></canvas></div>
+    </div>
+
+    <!-- 事件表 -->
+    <div class="pane" data-p="table">
+      <div class="toolstrip">
+        <div class="g">共 <span class="chip" id="tbCount">—</span> 行</div>
+        <div class="hsep"></div>
+        <div class="g">列
+          <select class="inp" id="tbCols" style="width:auto;padding:3px 6px">
+            <option value="common">通用列（时间/类型/PC/ADDL/IID）</option>
+            <option value="all">全部字段（并集）</option>
+          </select>
+        </div>
+        <div class="spacer"></div>
+        <div class="g" style="color:var(--fg3)">单击行查看详情并在时序图中定位</div>
+      </div>
+      <div class="vt" id="tbScroll">
+        <div class="vthead" id="tbHead"></div>
+        <div class="vtbody" id="tbBody"></div>
+      </div>
+    </div>
+
+    <!-- 统计 -->
+    <div class="pane" data-p="stats"><div class="stats" id="statsBody"></div></div>
+
+    <!-- 字典 -->
+    <div class="pane" data-p="dict"><div class="dictwrap" id="dictBody"></div></div>
+
+    <!-- 访存分析（针对含 ADDL 的事件） -->
+    <div class="pane" data-p="access">
+      <div class="toolstrip">
+        <div class="g">分析视图
+          <select class="inp" id="accView" style="width:auto;padding:3px 6px">
+            <option value="atime">地址-时间</option>
+            <option value="hot">地址热点 Top-N</option>
+            <option value="stride">访问步幅分布</option>
+            <option value="reuse">重访间隔分布</option>
+          </select>
+        </div>
+        <div class="g" id="accAxisWrap"><label class="sw" title="每个不同缓存行占一行，点的水平位置即访问时刻"><input type="checkbox" id="accAxis"> 地址轴按行号</label></div>
+        <div class="g" id="accKWrap">Top-N <input class="inp" id="accK" value="40" style="width:54px;padding:2px 5px"></div>
+        <div class="hsep"></div>
+        <div class="g">事件 <span class="chip" id="accEv">—</span></div>
+        <div class="g">缓存行 <span class="chip" id="accLines">—</span></div>
+        <div class="spacer"></div>
+        <div class="g" id="accHint" style="color:var(--fg3)"></div>
+      </div>
+      <div class="canvaswrap" id="accWrap"><canvas id="accCanvas"></canvas></div>
+    </div>
+
+    <!-- 时间轴缩略图：由 JS 动态挂载到当前活动时间轴视图（上方/下方） -->
+    <div id="miniWrap" style="display:none"><canvas id="miniCanvas"></canvas></div>
+
+    <!-- 详情抽屉 -->
+    <div id="detail">
+      <div class="dh"><h4 id="dTitle">事件详情</h4><button class="btn sm" id="dClose">✕</button></div>
+      <div class="db" id="dBody"></div>
+    </div>
+
+    <!-- 加载页 -->
+    <div id="loader">
+      <div class="drop" id="drop">
+        <h2>📊 CPU 访存 Trace 流水线分析器</h2>
+        <p>把 <code>trace.txt</code> 拖到这里，或点击下方按钮选择文件<br>
+        纯前端解析，数据不出本机，支持十万行级 trace<br>
+        <b style="color:var(--rel)">若按钮点不动（预览/沙箱拦截文件对话框），请用下方"粘贴 Trace 文本"加载</b></p>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <button class="btn primary" id="btnPick">选择 Trace 文件</button>
+          <button class="btn" id="btnFolder">选择 Trace 文件夹</button>
+        </div>
+        <input type="file" id="filePick" accept=".txt,.log,.trace,.csv" class="hideinput">
+        <input type="file" id="folderPick" webkitdirectory directory multiple class="hideinput">
+        <div class="pastebox">
+          <div class="pbhead">若上方按钮在预览 / 沙箱环境下点不动（原生文件对话框被拦截），请在此<b>粘贴 Trace 文本</b>加载：</div>
+          <textarea id="pasteArea" class="inp" placeholder="将 trace 文本（Ctrl+V / 右键粘贴）粘贴到此处，粘贴后自动解析…"></textarea>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:8px">
+            <button class="btn" id="btnPasteLoad">解析粘贴内容</button>
+            <button class="btn ghost" id="btnPasteClear">清空</button>
+          </div>
+        </div>
+        <div class="fmt">支持格式（分号分隔的键值记录，自动发现事件类型与字段）：
+
+  &lt;TIME&gt; ; &lt;TAG&gt; ; KEY:VALUE ; KEY:VALUE ; ...
+
+例：
+  105850000;BIU_PAD_AR;USER:2;SIZE:4;ADDL:0000000000;PC:0000;
+  302350000;LSU_LD_PIPE3;PC:19d8;PREG:02;ADDL:00000034c0;IID:0a;
+  106550000;L2C_CMP;ADDL:0000000000;TYPE:1000;RESP:00001;STAL:0;
+
+内置 openC910 / Triverse 预取器语义，其余事件类型自动泛化处理。</div>
+        <div id="prog"><div class="pbar"><i id="pbarI"></i></div><div id="ptext">准备中…</div></div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <span>事件 <b id="sTotal">0</b></span>
+  <span>可见 <b id="sVis">0</b></span>
+  <span>类型 <b id="sTags">0</b></span>
+  <span>周期跨度 <b id="sSpan">0</b></span>
+  <span>缓存行 <b id="sLines">0</b></span>
+  <span id="sFile" style="color:var(--fg3)"></span>
+  <span class="spacer" style="flex:1"></span>
+  <span id="sMsg" style="color:var(--fg3)"></span>
+</footer>
+
+</div>
+<div id="tip"></div>
+
+<script>
+"use strict";
+/* =======================================================================
+   0. 内置语义字典（可在「语义字典」页编辑，保存在 localStorage）
+   ======================================================================= */
+const BUILTIN = {
+  tags:{
+    LSU_LD_PIPE3 :{label:'LSU 取数·发射',   group:'CORE / LSU', color:'#4ea1ff', stage:'PIPE3', desc:'Load 指令进入 LSU 流水线，产生访存地址。SRC0/SRC1/OFF 为地址计算源操作数，LCHe 为 LSIQ 表项 one-hot。'},
+    LSU_LD_DA_fwd:{label:'LSU 取数·数据前递',group:'CORE / LSU', color:'#35c4dc', stage:'DA',    desc:'DA 级得到数据并前递。相对 PIPE3 通常 +3 周期；延迟拉长说明 L1 未命中、需等待 L2/主存回填。'},
+    LSU_LD_WB_pg :{label:'LSU 取数·写回',   group:'CORE / LSU', color:'#52d38a', stage:'WB',    desc:'数据写回物理寄存器。FROM=DA 表示由 DA 级直接前递，FROM=RB 表示来自回填缓冲。'},
+    LSU_ST_PIPE4 :{label:'LSU 存数·发射',   group:'CORE / LSU', color:'#f0a03c', stage:'ST',    desc:'Store 指令进入 LSU 流水线。CODE 为指令编码，SDIQ 为存数据队列表项 one-hot。'},
+    L2C_CMP      :{label:'L2 Cache 比较级', group:'L2 CACHE',   color:'#b478ff', stage:'L2',    desc:'L2 Cache 流水线比较（tag compare）级。TYPE 为请求类型位向量，RESP 为响应位向量，STAL=1 表示该拍被阻塞。'},
+    L2_TriPF     :{label:'L2 → 预取器 训练',group:'PREFETCH',   color:'#ff6fb5', stage:'TRAIN', desc:'L2 把访存事件送给 Triverse 预取器做训练。REQS 为训练请求属性位向量。'},
+    TriPF_L2     :{label:'预取器 → L2 请求',group:'PREFETCH',   color:'#ff4d6d', stage:'PFREQ', desc:'Triverse 预取器向 L2 发出预取请求。READY=0 表示 L2 反压未接收。'},
+    BIU_PAD_AR   :{label:'AXI 读地址通道',  group:'BIU / AXI',  color:'#ffd23f', stage:'AR',    desc:'BIU 在 PAD 上发出 AXI 读地址。LENG=突发长度-1，SIZE=log2(字节数)，ARID 为事务 ID。'},
+    BIU_PAD_AW   :{label:'AXI 写地址通道',  group:'BIU / AXI',  color:'#ff8c42', stage:'AW',    desc:'BIU 在 PAD 上发出 AXI 写地址。UNIQ/SNOP 与一致性域相关。'}
+  },
+  fields:{
+    ADDL :{label:'缓存行首地址', hex:true},
+    ADDB :{label:'块地址',       hex:true},
+    ADDR :{label:'传输地址',     hex:true},
+    ABYTE:{label:'字节地址',     hex:true},
+    PC   :{label:'指令 PC',      hex:true},
+    IID  :{label:'指令 ID',      hex:true},
+    PREG :{label:'目的物理寄存器',hex:true},
+    CODE :{label:'指令编码',     hex:true},
+    DATA :{label:'数据',         hex:true},
+    SRC0 :{label:'源操作数0',    hex:true},
+    SRC1 :{label:'源操作数1',    hex:true},
+    OFF  :{label:'地址偏移',     hex:true},
+    LCHe :{label:'LSIQ 表项(one-hot)', onehot:true},
+    SDIQ :{label:'存数据队列表项(one-hot)', onehot:true},
+    MMUr :{label:'MMU 就绪'},
+    SIZE :{label:'传输大小 log2(B)'},
+    LENG :{label:'突发长度-1'},
+    BURS :{label:'突发类型'},
+    CACH :{label:'Cache 属性'},
+    PROT :{label:'保护属性'},
+    LOCK :{label:'锁定'},
+    BARR :{label:'屏障类型'},
+    DOMA :{label:'一致性域'},
+    SNOP :{label:'Snoop 类型'},
+    UNIQ :{label:'Unique'},
+    USER :{label:'User 边带'},
+    ARID :{label:'AXI 读事务 ID', hex:true},
+    AWID :{label:'AXI 写事务 ID', hex:true},
+    TYPE :{label:'请求类型',      bits:true},
+    RESP :{label:'响应位向量',    bin:true},
+    SID  :{label:'源 ID',        hex:true},
+    MID  :{label:'主设备 ID'},
+    SRC  :{label:'请求来源'},
+    FROM :{label:'来源通道'},
+    CP   :{label:'一致性存在位'},
+    CLCP :{label:'清 CP'},
+    STCP :{label:'置 CP'},
+    HPCP :{label:'HPCP 总线'},
+    FATA :{label:'致命错误'},
+    WRAW :{label:'写原始数据'},
+    WRIT :{label:'写操作'},
+    STAL :{label:'流水线阻塞'},
+    REQS :{label:'请求属性',      bits:true},
+    READY:{label:'对端就绪'},
+    ATOM :{label:'原子操作'},
+    MODE :{label:'访问模式'}
+  },
+  values:{
+    'LSU_LD_WB_pg.FROM':{DA:'DA 级前递',RB:'回填缓冲'},
+    'TriPF_L2.READY'   :{'1':'L2 已接收','0':'L2 反压丢弃'},
+    'L2C_CMP.STAL'     :{'1':'被阻塞','0':'正常推进'},
+    'L2C_CMP.WRIT'     :{'1':'写事务','0':'读事务'},
+    'L2C_CMP.SRC'      :{'00':'核内请求','01':'外部/其他源'}
+  }
+};
+const LS_KEY='c910trace.dict.v1';
+let DICT=JSON.parse(JSON.stringify(BUILTIN));
+try{const s=localStorage.getItem(LS_KEY);if(s){const o=JSON.parse(s);
+  DICT.tags=Object.assign(DICT.tags,o.tags||{});DICT.fields=Object.assign(DICT.fields,o.fields||{});DICT.values=Object.assign(DICT.values,o.values||{});}}catch(e){}
+const PALETTE=['#4ea1ff','#35c4dc','#52d38a','#f0a03c','#b478ff','#ff6fb5','#ff4d6d','#ffd23f','#ff8c42','#7ee0c0','#c0a0ff','#ffa8a8','#8fd14f','#4dd0e1','#e59866'];
+function tagMeta(t){
+  if(DICT.tags[t])return DICT.tags[t];
+  let h=0;for(let i=0;i<t.length;i++)h=(h*31+t.charCodeAt(i))>>>0;
+  const m={label:t,group:'其他',color:PALETTE[h%PALETTE.length],stage:t.slice(0,6),desc:'自动识别的事件类型（未在语义字典中定义）'};
+  DICT.tags[t]=m;return m;
+}
+function fieldMeta(k){return DICT.fields[k]||{label:k};}
+function valLabel(tag,k,v){const m=DICT.values[tag+'.'+k];return m&&m[v]?m[v]:null;}
+
+/* =======================================================================
+   1. 全局状态
+   ======================================================================= */
+const S={
+  raw:[],            // {t, cyc, tag, d, ln}
+  tags:[],           // tag 名称列表
+  tagOn:{},          // tag -> bool
+  fieldsByTag:{},    // tag -> Set(field)
+  allFields:[],
+  byTag:{},          // tag -> [idx]
+  byAddl:new Map(),  // addl -> [idx]
+  minCyc:0,maxCyc:0,
+  cycUnit:100000,
+  vis:null,          // Uint8Array 可见掩码
+  visIdx:[],         // 可见事件下标（升序）
+  visByTag:{},       // tag -> 可见下标
+  sel:-1,
+  relMode:'none',     // 关联高亮模式：none / pc / addrl
+  relSet:null,       // 与选中事件相关的可见事件下标集合（不含自身）
+  relCount:0,
+  hlAddl:null,
+  txn:{load:[],prefetch:[],line:[],store:[]},
+  fileName:'',
+  pane:'timeline',
+  // 事务关联的启发式窗口（周期）。这些不是 trace 里的硬信息，
+  // 而是"按 ADDL + 时间邻近"推断出来的，取值会显著影响结论，故做成可调。
+  win:{l2cmp:80, axiar:4000, stAw:500, pfLead:4096, lineGap:2000}
+};
+const $=id=>document.getElementById(id);
+const fmt=n=>n.toLocaleString('en-US');
+const pct=(a,b)=>b?(a/b*100).toFixed(1)+'%':'—';
+
+/* =======================================================================
+   2. 解析
+   ======================================================================= */
+function gcd(a,b){while(b){[a,b]=[b,a%b];}return a;}
+
+function parseText(text,onDone){
+  const t0=performance.now();
+  $('prog').classList.add('on');
+  const lines=text.split('\n');
+  const N=lines.length;
+  const raw=new Array();
+  const tagSet=new Set();
+  const fieldsByTag={};
+  let bad=0;
+  let i=0;
+  const CHUNK=20000;
+  function step(){
+    const end=Math.min(i+CHUNK,N);
+    for(;i<end;i++){
+      let ln=lines[i];
+      if(!ln)continue;
+      ln=ln.trim();
+      if(!ln||ln[0]==='#'||ln[0]==='/')continue;
+      const parts=ln.split(';');
+      // 过滤空段
+      const seg=[];
+      for(let k=0;k<parts.length;k++){const p=parts[k].trim();if(p)seg.push(p);}
+      if(seg.length<2){bad++;continue;}
+      const t=Number(seg[0]);
+      if(!isFinite(t)){bad++;continue;}
+      const tag=seg[1];
+      tagSet.add(tag);
+      let fs=fieldsByTag[tag];
+      if(!fs){fs=fieldsByTag[tag]=new Set();}
+      const d={};
+      for(let k=2;k<seg.length;k++){
+        const s=seg[k];
+        let ci=s.indexOf(':');
+        if(ci<0)ci=s.indexOf('=');
+        if(ci<0){d['_'+k]=s;fs.add('_'+k);continue;}
+        const key=s.slice(0,ci).trim();
+        const val=s.slice(ci+1).trim();
+        d[key]=val;fs.add(key);
+      }
+      raw.push({t:t,cyc:0,tag:tag,d:d,ln:i+1});
+    }
+    const p=i/N;
+    $('pbarI').style.width=(p*100).toFixed(1)+'%';
+    $('ptext').textContent='解析中… '+fmt(i)+' / '+fmt(N)+' 行';
+    if(i<N){setTimeout(step,0);}
+    else{
+      $('ptext').textContent='建立索引…';
+      setTimeout(()=>finish(raw,tagSet,fieldsByTag,bad,t0,onDone),0);
+    }
+  }
+  step();
+}
+
+function finish(raw,tagSet,fieldsByTag,bad,t0,onDone){
+  raw.sort((a,b)=>a.t-b.t||a.ln-b.ln);
+  // 推断周期单位
+  let g=0,prev=null,cnt=0;
+  for(const e of raw){
+    if(prev!==null&&e.t!==prev){g=gcd(g,e.t-prev);cnt++;if(cnt>4000&&g<=1)break;}
+    prev=e.t;
+  }
+  if(!g||g<1)g=1;
+  S.cycUnit=g;
+  $('oCyc').value=g;
+  const tmin=raw.length?raw[0].t:0;
+  for(const e of raw)e.cyc=Math.round((e.t-tmin)/g);
+  S.tmin=tmin;
+  S.raw=raw;
+  S.minCyc=raw.length?raw[0].cyc:0;
+  S.maxCyc=raw.length?raw[raw.length-1].cyc:1;
+  S.tags=[...tagSet].sort((a,b)=>{
+    const ga=tagMeta(a).group,gb=tagMeta(b).group;
+    return ga<gb?-1:ga>gb?1:(a<b?-1:1);
+  });
+  S.fieldsByTag={};
+  const af=new Set();
+  for(const k in fieldsByTag){S.fieldsByTag[k]=[...fieldsByTag[k]];fieldsByTag[k].forEach(x=>af.add(x));}
+  S.allFields=[...af];
+  S.byTag={};S.byAddl=new Map();
+  for(const t of S.tags)S.byTag[t]=[];
+  for(let i=0;i<raw.length;i++){
+    const e=raw[i];
+    S.byTag[e.tag].push(i);
+    const a=e.d.ADDL;
+    if(a!==undefined){let arr=S.byAddl.get(a);if(!arr){arr=[];S.byAddl.set(a,arr);}arr.push(i);}
+  }
+  for(const t of S.tags)S.tagOn[t]=true;
+  buildTxns();
+  $('ptext').textContent='完成，用时 '+((performance.now()-t0)/1000).toFixed(2)+' 秒';
+  onDone(bad);
+}
+
+/* =======================================================================
+   3. 事务重建（流水线核心）
+   ======================================================================= */
+function buildTxns(){
+  const raw=S.raw,W=S.win;
+  const T={load:[],prefetch:[],line:[],store:[]};
+  // 统一收尾：保证每条事务都有 end / lat，避免 undefined 流入排序与绘制
+  const seal=o=>{o.end=o.stages[o.stages.length-1].cyc;o.lat=o.end-o.start;return o;};
+
+  /* ---- Load：IID 就近配对 PIPE3 → DA → WB ----
+     IID 是循环复用的短标签，同一 IID 再次发射时，旧事务视为未观测到 WB（被冲刷或 trace 截断）。 */
+  const pend=new Map();
+  for(let i=0;i<raw.length;i++){
+    const e=raw[i];
+    if(e.tag==='LSU_LD_PIPE3'){
+      const iid=e.d.IID;
+      if(pend.has(iid)){
+        const o=pend.get(iid);
+        if(o.stages.length>1){o.partial=1;T.load.push(seal(o));}
+      }
+      pend.set(iid,{kind:'load',key:iid,pc:e.d.PC,addl:e.d.ADDL,start:e.cyc,
+        stages:[{name:'PIPE3',cyc:e.cyc,idx:i,tag:e.tag}]});
+    }else if(e.tag==='LSU_LD_DA_fwd'){
+      const o=pend.get(e.d.IID);
+      if(o&&!o.hasDA){o.hasDA=1;o.stages.push({name:'DA',cyc:e.cyc,idx:i,tag:e.tag});if(e.d.ADDL)o.addl=e.d.ADDL;}
+    }else if(e.tag==='LSU_LD_WB_pg'){
+      const o=pend.get(e.d.IID);
+      if(o){o.stages.push({name:'WB',cyc:e.cyc,idx:i,tag:e.tag});
+        o.wbFrom=e.d.FROM;o.data=e.d.DATA;o.preg=e.d.PREG;o.done=1;
+        if(e.d.ADDL)o.addl=e.d.ADDL;
+        // L1 未命中判据：数据没走 DA 级前递，而是由回填缓冲(RB)供给
+        o.miss=(!o.hasDA||e.d.FROM==='RB')?1:0;
+        T.load.push(seal(o));pend.delete(e.d.IID);}
+    }
+  }
+  for(const o of pend.values())if(o.stages.length>1){o.partial=1;T.load.push(seal(o));}
+  T.load.sort((a,b)=>a.start-b.start);
+
+  /* ---- 索引 ---- */
+  const cmpByAddl=new Map(),arByAddl=new Map(),lsuByAddl=new Map(),awByAddl=new Map();
+  const push=(m,a,i)=>{if(a===undefined)return;let x=m.get(a);if(!x){x=[];m.set(a,x);}x.push(i);};
+  for(const i of (S.byTag['L2C_CMP']||[]))push(cmpByAddl,raw[i].d.ADDL,i);
+  for(const i of (S.byTag['BIU_PAD_AR']||[]))push(arByAddl,raw[i].d.ADDL,i);
+  for(const i of (S.byTag['BIU_PAD_AW']||[]))push(awByAddl,raw[i].d.ADDL,i);
+  for(const t of ['LSU_LD_PIPE3','LSU_ST_PIPE4'])for(const i of (S.byTag[t]||[]))push(lsuByAddl,raw[i].d.ADDL,i);
+  // ⚠ lsuByAddl 由多个 tag 拼接而成，拼接后不再按时间有序。
+  // seek() 依赖数组时间有序才能返回"最早的一次"，否则提前量会算错，必须显式排序。
+  for(const arr of lsuByAddl.values())arr.sort((x,y)=>raw[x].cyc-raw[y].cyc||x-y);
+  // 二分找第一个 cyc>=from，再线性校验窗口，避免长数组上的 O(n) 扫描
+  const seek=(m,a,from,win)=>{
+    const arr=m.get(a);if(!arr||!arr.length)return -1;
+    let lo=0,hi=arr.length;
+    while(lo<hi){const mid=(lo+hi)>>1;if(raw[arr[mid]].cyc<from)lo=mid+1;else hi=mid;}
+    if(lo>=arr.length)return -1;
+    const j=arr[lo],c=raw[j].cyc;
+    return (win<0||c-from<=win)?j:-1;
+  };
+
+  /* ---- Store：ST_PIPE4 →（启发式）同 ADDL 的 AXI AW ----
+     注意：AW 数量远少于 Store，多条 Store 会命中同一条 AW（写合并 / 同行反复写），
+     因此这只是"该 Store 之后本行发生过写出"的弱证据，不是一对一因果链。 */
+  for(const i of (S.byTag['LSU_ST_PIPE4']||[])){
+    const e=raw[i];
+    const o={kind:'store',key:e.d.IID,pc:e.d.PC,addl:e.d.ADDL,start:e.cyc,weak:1,
+      stages:[{name:'ST',cyc:e.cyc,idx:i,tag:e.tag}]};
+    const j=seek(awByAddl,e.d.ADDL,e.cyc,W.stAw);
+    if(j>=0){o.stages.push({name:'AW',cyc:raw[j].cyc,idx:j,tag:'BIU_PAD_AW'});o.awIdx=j;}
+    T.store.push(seal(o));
+  }
+  // 标注每条 AW 被多少 Store 认领，用于提示错配风险
+  const awClaim=new Map();
+  for(const o of T.store)if(o.awIdx!==undefined)awClaim.set(o.awIdx,(awClaim.get(o.awIdx)||0)+1);
+  for(const o of T.store)if(o.awIdx!==undefined)o.awShare=awClaim.get(o.awIdx);
+
+  /* ---- Prefetch：TriPF_L2 →（READY=1 才继续）L2C_CMP → BIU_AR → 首次被 LSU 使用 ---- */
+  for(const i of (S.byTag['TriPF_L2']||[])){
+    const e=raw[i],a=e.d.ADDL;
+    const accepted=e.d.READY!=='0';
+    const o={kind:'prefetch',key:a,addl:a,pc:'',start:e.cyc,accepted:accepted,
+      stages:[{name:'PF-REQ',cyc:e.cyc,idx:i,tag:e.tag}]};
+    // 被反压的请求根本没进 L2，不能把同 ADDL 的其他 L2C_CMP 算到它头上
+    if(accepted){
+      const c=seek(cmpByAddl,a,e.cyc,W.l2cmp);
+      if(c>=0)o.stages.push({name:'L2-CMP',cyc:raw[c].cyc,idx:c,tag:'L2C_CMP'});
+      const r=seek(arByAddl,a,e.cyc,W.axiar);
+      if(r>=0)o.stages.push({name:'AXI-AR',cyc:raw[r].cyc,idx:r,tag:'BIU_PAD_AR'});
+    }
+    const u=seek(lsuByAddl,a,e.cyc+1,-1);
+    if(u>=0){
+      o.lead=raw[u].cyc-e.cyc;o.usedLater=1;o.useIdx=u;
+      // 只有在提前量窗口内被访问才算"及时有用"；过早预取大概率已被替换出去
+      if(accepted&&o.lead<=W.pfLead){o.useful=1;o.stages.push({name:'被使用',cyc:raw[u].cyc,idx:u,tag:raw[u].tag});}
+      else o.early=1;
+    }
+    T.prefetch.push(seal(o));
+  }
+
+  /* ---- 缓存行生命周期：同 ADDL 事件按间隔切段 ---- */
+  const GAP=W.lineGap;
+  for(const [a,arr] of S.byAddl){
+    if(arr.length<2)continue;
+    let cur=null;
+    for(const i of arr){
+      const e=raw[i];
+      if(!cur||e.cyc-cur.end>GAP){
+        if(cur&&cur.stages.length>1)T.line.push(cur);
+        cur={kind:'line',key:a,addl:a,pc:e.d.PC||'',start:e.cyc,end:e.cyc,stages:[]};
+      }
+      cur.stages.push({name:tagMeta(e.tag).stage,cyc:e.cyc,idx:i,tag:e.tag});
+      cur.end=e.cyc;
+    }
+    if(cur&&cur.stages.length>1)T.line.push(cur);
+  }
+  for(const o of T.line)o.lat=o.end-o.start;
+  T.line.sort((a,b)=>a.start-b.start);
+  S.txn=T;
+}
+
+/* =======================================================================
+   4. 过滤
+   ======================================================================= */
+function hexNum(v){
+  if(v===undefined||v===null)return NaN;
+  const s=String(v).trim();
+  if(/^0x/i.test(s))return parseInt(s,16);
+  if(/^[0-9a-f]+$/i.test(s)){
+    // 纯数字优先按十进制？trace 中地址/PC 皆为十六进制，统一按 16 进制
+    return parseInt(s,16);
+  }
+  return NaN;
+}
+function parseExpr(txt){
+  const out=[];
+  for(let line of txt.split('\n')){
+    line=line.trim();if(!line)continue;
+    const m=line.match(/^([A-Za-z_][\w]*)\s*(!=|>=|<=|=|~|>|<)\s*(.+)$/);
+    if(!m)continue;
+    out.push({k:m[1],op:m[2],v:m[3].trim()});
+  }
+  return out;
+}
+function applyFilter(){
+  const raw=S.raw,n=raw.length;
+  const vis=new Uint8Array(n);
+  const pcs=$('fPc').value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  const addl=$('fAddl').value.trim().toLowerCase();
+  const iid=$('fIid').value.trim().toLowerCase();
+  const text=$('fText').value.trim().toLowerCase();
+  const exprs=parseExpr($('fExpr').value);
+  const t0=$('fT0').value.trim()===''?-Infinity:Number($('fT0').value);
+  const t1=$('fT1').value.trim()===''?Infinity:Number($('fT1').value);
+  const idx=[],byTag={};
+  for(const t of S.tags)byTag[t]=[];
+  outer:
+  for(let i=0;i<n;i++){
+    const e=raw[i];
+    if(!S.tagOn[e.tag])continue;
+    if(e.cyc<t0||e.cyc>t1)continue;
+    const d=e.d;
+    if(pcs.length){
+      const p=(d.PC||'').toLowerCase();
+      let ok=false;for(const q of pcs)if(p.includes(q)){ok=true;break;}
+      if(!ok)continue;
+    }
+    if(addl&&!(d.ADDL||'').toLowerCase().includes(addl))continue;
+    if(iid&&!(d.IID||'').toLowerCase().includes(iid))continue;
+    if(text){
+      let hit=false;
+      if(e.tag.toLowerCase().includes(text))hit=true;
+      if(!hit)for(const k in d){if(String(d[k]).toLowerCase().includes(text)||k.toLowerCase().includes(text)){hit=true;break;}}
+      if(!hit)continue;
+    }
+    for(const ex of exprs){
+      const raww=d[ex.k];
+      if(raww===undefined)continue outer;
+      const rv=String(raww).toLowerCase(),ev=ex.v.toLowerCase();
+      switch(ex.op){
+        case '=' : if(rv!==ev)continue outer; break;
+        case '!=': if(rv===ev)continue outer; break;
+        case '~' : if(!rv.includes(ev))continue outer; break;
+        case '>' : if(!(hexNum(rv)>hexNum(ev)))continue outer; break;
+        case '<' : if(!(hexNum(rv)<hexNum(ev)))continue outer; break;
+        case '>=': if(!(hexNum(rv)>=hexNum(ev)))continue outer; break;
+        case '<=': if(!(hexNum(rv)<=hexNum(ev)))continue outer; break;
+      }
+    }
+    vis[i]=1;idx.push(i);byTag[e.tag].push(i);
+  }
+  S.vis=vis;S.visIdx=idx;S.visByTag=byTag;
+  $('sVis').textContent=fmt(idx.length);
+  const lines=new Set();
+  for(const i of idx){const a=raw[i].d.ADDL;if(a!==undefined)lines.add(a);}
+  $('sLines').textContent=fmt(lines.size);
+  let html='';
+  html+='可见 <b style="color:var(--fg)">'+fmt(idx.length)+'</b> / '+fmt(n)+'<br>';
+  html+='占比 '+pct(idx.length,n)+'<br>';
+  html+='涉及缓存行 '+fmt(lines.size);
+  $('filtSum').innerHTML=html;
+  refreshTags();
+  if(S.sel>=0)computeRel();
+  redraw();
+}
+
+/* 读取当前主题的画布调色板。Canvas 不认识 CSS 变量，必须每帧解析一次。 */
+function palette(css){
+  const g=k=>css.getPropertyValue(k).trim();
+  return {bg:g('--bg'),bg2:g('--bg2'),bg3:g('--bg3'),bg4:g('--bg4'),
+    line:g('--line'),line2:g('--line2'),
+    fg:g('--fg'),fg2:g('--fg2'),fg3:g('--fg3'),
+    acc:g('--acc'),acc2:g('--acc2'),ok:g('--ok'),warn:g('--warn'),err:g('--err'),
+    rel:g('--rel'),
+    rowHi:g('--rowHi'),markHi:g('--markHi'),navFill:g('--navFill'),onBar:g('--onBar')};
+}
+const REL_MAX=400;   // 关联连线/高亮点的绘制上限，避免极端缩放（超高频 PC/缓存行）下重绘卡顿
+
+/* =======================================================================
+   5. 泳道时序图
+   ======================================================================= */
+const TL={
+  cv:null,cx:null,W:0,H:0,dpr:1,
+  t0:0,t1:1,          // 视窗周期范围
+  lanes:[],           // {tag,y,h,color,label}
+  padL:132,padT:52,padR:12,padB:12,
+  navH:34,
+  drag:null,hover:-1,
+  nav:null
+};
+function tlInit(){
+  TL.cv=$('tlCanvas');TL.cx=TL.cv.getContext('2d');
+  const w=$('tlWrap');
+  new ResizeObserver(()=>{tlResize();tlDraw();}).observe(w);
+  TL.cv.addEventListener('wheel',tlWheel,{passive:false});
+  TL.cv.addEventListener('mousedown',tlDown);
+  window.addEventListener('mousemove',tlMove);
+  window.addEventListener('mouseup',tlUp);
+  TL.cv.addEventListener('dblclick',()=>{tlFit();});
+  TL.cv.addEventListener('mouseleave',()=>{hideTip();TL.hover=-1;tlDraw();});
+  TL.cv.addEventListener('click',tlClick);
+}
+function tlResize(){
+  const w=$('tlWrap');if(!w)return;
+  const r=w.getBoundingClientRect();
+  TL.dpr=window.devicePixelRatio||1;
+  TL.W=Math.max(10,r.width);TL.H=Math.max(10,r.height);
+  TL.cv.width=TL.W*TL.dpr;TL.cv.height=TL.H*TL.dpr;
+  TL.cx.setTransform(TL.dpr,0,0,TL.dpr,0,0);
+}
+function tlLanes(){
+  const on=S.tags.filter(t=>S.tagOn[t]);
+  const groups=[];const gmap={};
+  for(const t of on){const g=tagMeta(t).group;if(!gmap[g]){gmap[g]=[];groups.push(g);}gmap[g].push(t);}
+  const avail=TL.H-TL.padT-TL.padB-TL.navH;
+  const rows=on.length,gaps=groups.length;
+  let lh=Math.max(15,Math.min(48,(avail-gaps*9)/Math.max(1,rows)));
+  const lanes=[];let y=TL.padT;
+  for(const g of groups){
+    lanes.push({group:g,y:y,h:0,isGroup:true});
+    y+=9;
+    for(const t of gmap[g]){
+      lanes.push({tag:t,y:y,h:lh,color:tagMeta(t).color,label:tagMeta(t).label});
+      y+=lh;
+    }
+  }
+  TL.lanes=lanes;TL.laneH=lh;TL.contentBottom=y;
+}
+function xOf(c){const w=TL.W-TL.padL-TL.padR;return TL.padL+(c-TL.t0)/(TL.t1-TL.t0)*w;}
+function cOf(x){const w=TL.W-TL.padL-TL.padR;return TL.t0+(x-TL.padL)/w*(TL.t1-TL.t0);}
+function bsearch(arr,cyc){ // 第一个 cyc >= 目标
+  let lo=0,hi=arr.length;
+  while(lo<hi){const m=(lo+hi)>>1;if(S.raw[arr[m]].cyc<cyc)lo=m+1;else hi=m;}
+  return lo;
+}
+function tlFit(){
+  const idx=S.visIdx;
+  if(!idx.length){TL.t0=S.minCyc;TL.t1=S.maxCyc||1;}
+  else{TL.t0=S.raw[idx[0]].cyc;TL.t1=S.raw[idx[idx.length-1]].cyc;}
+  const sp=Math.max(1,TL.t1-TL.t0);TL.t0-=sp*0.01;TL.t1+=sp*0.01;
+  tlDraw();
+}
+function tlZoom(f,cx){
+  const c=cx===undefined?(TL.t0+TL.t1)/2:cOf(cx);
+  let a=c-(c-TL.t0)*f,b=c+(TL.t1-c)*f;
+  if(b-a<0.5){const m=(a+b)/2;a=m-0.25;b=m+0.25;}
+  const lim=(S.maxCyc-S.minCyc)*6+100;
+  if(b-a>lim){a=S.minCyc-lim*0.02;b=a+lim;}
+  TL.t0=a;TL.t1=b;tlDraw();
+}
+function tlWheel(e){
+  e.preventDefault();
+  const r=TL.cv.getBoundingClientRect();
+  if(e.shiftKey){const d=(TL.t1-TL.t0)*0.12*Math.sign(e.deltaY);TL.t0+=d;TL.t1+=d;tlDraw();return;}
+  tlZoom(e.deltaY>0?1.22:1/1.22,e.clientX-r.left);
+}
+function tlDown(e){
+  const r=TL.cv.getBoundingClientRect();
+  const x=e.clientX-r.left,y=e.clientY-r.top;
+  if(y>TL.H-TL.navH){ // 导航条
+    const c=S.minCyc+(x/TL.W)*(S.maxCyc-S.minCyc);
+    const sp=TL.t1-TL.t0;TL.t0=c-sp/2;TL.t1=c+sp/2;
+    TL.drag={mode:'nav'};tlDraw();return;
+  }
+  TL.drag={mode:e.shiftKey?'sel':'pan',x0:x,y0:y,t0:TL.t0,t1:TL.t1,x1:x};
+}
+function tlMove(e){
+  const r=TL.cv.getBoundingClientRect();
+  const x=e.clientX-r.left,y=e.clientY-r.top;
+  if(TL.drag){
+    if(TL.drag.mode==='pan'){
+      const w=TL.W-TL.padL-TL.padR;
+      const d=(TL.drag.x0-x)/w*(TL.drag.t1-TL.drag.t0);
+      TL.t0=TL.drag.t0+d;TL.t1=TL.drag.t1+d;tlDraw();
+    }else if(TL.drag.mode==='sel'){TL.drag.x1=x;tlDraw();}
+    else if(TL.drag.mode==='nav'){
+      const c=S.minCyc+(x/TL.W)*(S.maxCyc-S.minCyc);
+      const sp=TL.t1-TL.t0;TL.t0=c-sp/2;TL.t1=c+sp/2;tlDraw();
+    }
+    return;
+  }
+  if(Mini.drag)return;
+  if(S.pane!=='timeline')return;
+  if(x<0||y<0||x>TL.W||y>TL.H){hideTip();return;}
+  const h=tlHit(x,y);
+  if(h!==TL.hover){TL.hover=h;tlDraw();}
+  if(h>=0)showTipEvent(h,e.clientX,e.clientY);else hideTip();
+}
+function tlUp(e){
+  if(!TL.drag)return;
+  if(TL.drag.mode==='sel'&&Math.abs(TL.drag.x1-TL.drag.x0)>6){
+    const a=cOf(Math.min(TL.drag.x0,TL.drag.x1)),b=cOf(Math.max(TL.drag.x0,TL.drag.x1));
+    TL.t0=a;TL.t1=b;
+  }
+  TL.drag=null;tlDraw();
+}
+function tlHit(x,y){
+  let lane=null;
+  for(const L of TL.lanes){if(L.isGroup)continue;if(y>=L.y&&y<L.y+L.h){lane=L;break;}}
+  if(!lane)return -1;
+  const arr=S.visByTag[lane.tag];if(!arr||!arr.length)return -1;
+  const tol=(TL.t1-TL.t0)/(TL.W-TL.padL-TL.padR)*6;
+  const c=cOf(x);
+  let lo=bsearch(arr,c-tol),best=-1,bd=1e18;
+  for(let i=Math.max(0,lo-2);i<arr.length;i++){
+    const cc=S.raw[arr[i]].cyc;
+    if(cc>c+tol)break;
+    const d=Math.abs(cc-c);
+    if(d<bd){bd=d;best=arr[i];}
+  }
+  return best;
+}
+function tlClick(e){
+  const r=TL.cv.getBoundingClientRect();
+  const h=tlHit(e.clientX-r.left,e.clientY-r.top);
+  if(h>=0)selectEvent(h);
+}
+function tlDraw(){
+  if(!TL.cx)return;
+  const cx=TL.cx,W=TL.W,H=TL.H;
+  // 缩略图启用时，隐藏画布内自带的底部导航条（由 minimap 接管导航）
+  TL.navH=(typeof Mini!=='undefined'&&Mini.enabled&&S.pane==='timeline')?0:34;
+  const css=getComputedStyle(document.documentElement);
+  const C=palette(css);
+  cx.fillStyle=C.bg;cx.fillRect(0,0,W,H);
+  if(!S.raw.length){cx.fillStyle=C.fg3;cx.font='13px sans-serif';cx.textAlign='center';cx.fillText('请先加载 Trace 文件',W/2,H/2);return;}
+  // 画布尚未完成布局（隐藏 / 极窄）时宽度会退化为兜底值，此时绘图区为负，直接跳过本帧
+  if(W-TL.padL-TL.padR<20||H-TL.padT-TL.padB-TL.navH<20)return;
+  tlLanes();
+  const plotX=TL.padL,plotW=W-TL.padL-TL.padR;
+  const span=TL.t1-TL.t0;
+  const showLabel=$('oLabel').checked;
+  const showGrid=$('oGrid').checked;
+
+  /* --- 时间刻度 --- */
+  const targetPx=96;
+  let step=Math.pow(10,Math.floor(Math.log10(span/plotW*targetPx)));
+  const cand=[1,2,5,10];
+  for(const m of cand){if(step*m*plotW/span>=targetPx){step=step*m;break;}}
+  cx.save();cx.beginPath();cx.rect(plotX,0,plotW,H-TL.navH);cx.clip();
+  cx.font='10px '+css.getPropertyValue('--mono');
+  cx.textAlign='left';
+  for(let c=Math.ceil(TL.t0/step)*step;c<TL.t1;c+=step){
+    const x=xOf(c);
+    if(showGrid){cx.strokeStyle=C.line;cx.lineWidth=1;cx.beginPath();cx.moveTo(x+.5,TL.padT-8);cx.lineTo(x+.5,TL.contentBottom);cx.stroke();}
+    cx.fillStyle=C.fg3;cx.fillText(fmt(Math.round(c)),x+3,26);
+  }
+  cx.restore();
+  cx.strokeStyle=C.line2;cx.lineWidth=1;
+  cx.beginPath();cx.moveTo(0,TL.padT-8.5);cx.lineTo(W,TL.padT-8.5);cx.stroke();
+  cx.fillStyle=C.fg3;cx.font='10px '+css.getPropertyValue('--mono');cx.textAlign='left';
+  cx.fillText('周期 (cycle)',6,26);
+
+  /* --- 泳道背景与标签 --- */
+  let alt=0;
+  for(const L of TL.lanes){
+    if(L.isGroup){
+      cx.fillStyle=C.fg3;cx.font='700 9.5px '+css.getPropertyValue('--sans');cx.textAlign='left';
+      cx.fillText(L.group.toUpperCase(),6,L.y+7);
+      cx.strokeStyle=C.line;cx.beginPath();cx.moveTo(0,L.y+.5);cx.lineTo(W,L.y+.5);cx.stroke();
+      continue;
+    }
+    if(alt++%2===0){cx.fillStyle=C.bg2;cx.fillRect(0,L.y,W,L.h);}
+    cx.fillStyle=L.color;cx.fillRect(0,L.y+2,3,L.h-4);
+    cx.fillStyle=C.fg2;cx.font='10.5px '+css.getPropertyValue('--sans');cx.textAlign='left';
+    const nm=L.label.length>16?L.label.slice(0,15)+'…':L.label;
+    cx.fillText(nm,8,L.y+L.h/2+3);
+    const cnt=(S.visByTag[L.tag]||[]).length;
+    cx.fillStyle=C.fg3;cx.font='9px '+css.getPropertyValue('--mono');cx.textAlign='right';
+    cx.fillText(fmt(cnt),TL.padL-6,L.y+L.h/2+3);
+  }
+  cx.strokeStyle=C.line2;cx.beginPath();cx.moveTo(TL.padL-.5,TL.padT-8);cx.lineTo(TL.padL-.5,TL.contentBottom);cx.stroke();
+
+  /* --- 事件绘制 --- */
+  cx.save();cx.beginPath();cx.rect(plotX,TL.padT-8,plotW,TL.contentBottom-TL.padT+8);cx.clip();
+  let drawn=0;
+  TL.relPts={};   // 记录已绘制事件的中心坐标，供关联连线使用
+  const hlA=$('oAddr').checked?S.hlAddl:null;
+  const laneByTag={};
+  for(const L of TL.lanes)if(!L.isGroup)laneByTag[L.tag]=L;
+
+  for(const L of TL.lanes){
+    if(L.isGroup)continue;
+    const arr=S.visByTag[L.tag];if(!arr||!arr.length)continue;
+    const lo=Math.max(0,bsearch(arr,TL.t0)-1);
+    const hi=Math.min(arr.length,bsearch(arr,TL.t1)+1);
+    const cnt=hi-lo;
+    if(cnt<=0)continue;
+    const mh=Math.max(5,L.h-7);
+    const my=L.y+(L.h-mh)/2;
+    if(cnt>plotW*1.5){
+      // 密度模式
+      const buck=new Float32Array(Math.ceil(plotW)+1);
+      let mx=0;
+      for(let i=lo;i<hi;i++){
+        const p=Math.floor(xOf(S.raw[arr[i]].cyc)-plotX);
+        if(p>=0&&p<buck.length){buck[p]++;if(buck[p]>mx)mx=buck[p];}
+        // 记录关联事件坐标（仅可见范围内），供密度模式下关联连线
+        const x=xOf(S.raw[arr[i]].cyc),xi=Math.round(x);
+        if(xi>=plotX-2&&xi<=plotX+plotW+2)TL.relPts[arr[i]]={x,y:my+mh/2};
+      }
+      for(let p=0;p<buck.length;p++){
+        if(!buck[p])continue;
+        const f=Math.min(1,0.28+0.72*(buck[p]/mx));
+        cx.globalAlpha=f;cx.fillStyle=L.color;
+        const hh=Math.max(2,mh*f);
+        cx.fillRect(plotX+p,my+(mh-hh)/2,1,hh);
+        drawn++;
+      }
+      cx.globalAlpha=1;
+    }else{
+      const bw=Math.max(2,Math.min(16,plotW/Math.max(1,cnt)*0.62));
+      for(let i=lo;i<hi;i++){
+        const gi=arr[i],e=S.raw[gi];
+        const x=xOf(e.cyc);
+        if(x<plotX-20||x>plotX+plotW+20)continue;
+        const isHl=hlA&&e.d.ADDL===hlA;
+        const isSel=gi===S.sel,isHov=gi===TL.hover;
+        const isRel=S.relSet&&S.relSet.has(gi);
+        TL.relPts[gi]={x,y:my+mh/2};
+        cx.fillStyle=L.color;
+        cx.globalAlpha=isHl||isSel||isHov||isRel?1:(hlA?0.28:0.92);
+        cx.fillRect(x-bw/2,my,bw,mh);
+        if(isSel||isHov){
+          cx.globalAlpha=1;cx.strokeStyle=isSel?C.fg:C.acc;cx.lineWidth=1.6;
+          cx.strokeRect(x-bw/2-1.5,my-1.5,bw+3,mh+3);
+        }
+        if(isHl&&!isSel){cx.globalAlpha=1;cx.strokeStyle=C.markHi;cx.lineWidth=1;cx.strokeRect(x-bw/2-.5,my-.5,bw+1,mh+1);}
+        if(isRel&&!isSel){cx.globalAlpha=1;cx.strokeStyle=C.rel;cx.lineWidth=1.4;cx.strokeRect(x-bw/2-1,my-1,bw+2,mh+2);}
+        drawn++;
+        if(showLabel&&bw>=11&&mh>=13){
+          const lab=e.d.PC?('pc'+e.d.PC):(e.d.ADDL||'');
+          if(lab){cx.globalAlpha=1;cx.fillStyle=C.onBar;cx.font='8px '+css.getPropertyValue('--mono');cx.textAlign='center';
+            cx.fillText(lab.slice(-4),x,my+mh/2+3);}
+        }
+      }
+      cx.globalAlpha=1;
+    }
+  }
+
+  /* --- IID 流水线连线 --- */
+  if($('oLink').checked&&span<40000){
+    const L1=laneByTag['LSU_LD_PIPE3'],L2=laneByTag['LSU_LD_DA_fwd'],L3=laneByTag['LSU_LD_WB_pg'];
+    if(L1&&L2&&L3){
+      cx.lineWidth=1.1;
+      const list=S.txn.load;
+      let lo=0,hi=list.length;
+      // 二分找起点
+      {let a=0,b=list.length;while(a<b){const m=(a+b)>>1;if(list[m].end<TL.t0)a=m+1;else b=m;}lo=a;}
+      for(let i=lo;i<list.length;i++){
+        const o=list[i];
+        if(o.start>TL.t1)break;
+        if(!S.vis[o.stages[0].idx])continue;
+        const hl=hlA&&o.addl===hlA;
+        cx.strokeStyle=hl?C.markHi:(o.lat>8?C.err:C.line2);
+        cx.globalAlpha=hl?0.95:(o.lat>8?0.75:0.36);
+        cx.beginPath();
+        let first=true;
+        for(const st of o.stages){
+          const L=laneByTag[st.tag];if(!L)continue;
+          const x=xOf(st.cyc),y=L.y+L.h/2;
+          if(first){cx.moveTo(x,y);first=false;}else cx.lineTo(x,y);
+        }
+        cx.stroke();
+      }
+      cx.globalAlpha=1;
+    }
+  }
+  /* --- 同缓存行连线 --- */
+  if(hlA){
+    const arr=(S.byAddl.get(hlA)||[]).filter(i=>S.vis[i]);
+    cx.strokeStyle=C.markHi;cx.globalAlpha=.5;cx.lineWidth=1;cx.setLineDash([3,3]);
+    cx.beginPath();let f=true;
+    for(const i of arr){
+      const e=S.raw[i],L=laneByTag[e.tag];if(!L)continue;
+      const x=xOf(e.cyc),y=L.y+L.h/2;
+      if(f){cx.moveTo(x,y);f=false;}else cx.lineTo(x,y);
+    }
+    cx.stroke();cx.setLineDash([]);cx.globalAlpha=1;
+  }
+  /* --- 关联高亮连线（同PC / 同ADDL） --- */
+  if(S.relSet){
+    const sp=TL.relPts[S.sel];
+    if(sp){
+      cx.save();
+      cx.lineWidth=1.3;cx.strokeStyle=C.rel;cx.globalAlpha=.8;cx.setLineDash([4,3]);
+      let n=0;
+      for(const j of S.relSet){
+        if(n++>=REL_MAX)break;
+        const p=TL.relPts[j];if(!p)continue;
+        cx.beginPath();cx.moveTo(sp.x,sp.y);cx.lineTo(p.x,p.y);cx.stroke();
+      }
+      cx.setLineDash([]);cx.globalAlpha=1;cx.fillStyle=C.rel;n=0;
+      for(const j of S.relSet){
+        if(n++>=REL_MAX)break;
+        const p=TL.relPts[j];if(!p)continue;
+        cx.beginPath();cx.arc(p.x,p.y,3.4,0,7);cx.fill();
+        cx.lineWidth=1.5;cx.strokeStyle=C.bg;cx.stroke();
+      }
+      cx.restore();
+    }
+  }
+  cx.restore();
+
+  /* --- 框选 --- */
+  if(TL.drag&&TL.drag.mode==='sel'){
+    const a=Math.min(TL.drag.x0,TL.drag.x1),b=Math.max(TL.drag.x0,TL.drag.x1);
+    cx.fillStyle=C.rowHi;cx.fillRect(a,TL.padT-8,b-a,TL.contentBottom-TL.padT+8);
+    cx.strokeStyle=C.acc;cx.lineWidth=1;cx.strokeRect(a+.5,TL.padT-8.5,b-a,TL.contentBottom-TL.padT+8);
+  }
+
+  /* --- 底部导航条（缩略图关闭时显示） --- */
+  if(TL.navH>0){
+  const ny=H-TL.navH;
+  cx.fillStyle=C.bg2;cx.fillRect(0,ny,W,TL.navH);
+  cx.strokeStyle=C.line2;cx.beginPath();cx.moveTo(0,ny+.5);cx.lineTo(W,ny+.5);cx.stroke();
+  if(!TL.nav||TL.nav.w!==Math.ceil(W)||TL.nav.stamp!==S.visIdx.length){
+    const bw=Math.ceil(W),b=new Float32Array(bw);let mx=1;
+    const rg=Math.max(1,S.maxCyc-S.minCyc);
+    for(const i of S.visIdx){
+      const p=Math.floor((S.raw[i].cyc-S.minCyc)/rg*(bw-1));
+      b[p]++;if(b[p]>mx)mx=b[p];
+    }
+    TL.nav={w:bw,b:b,mx:mx,stamp:S.visIdx.length};
+  }
+  const nv=TL.nav,nh=TL.navH-9;
+  cx.fillStyle=C.acc;cx.globalAlpha=.55;
+  for(let p=0;p<nv.w;p++){
+    if(!nv.b[p])continue;
+    const hh=Math.max(1,Math.pow(nv.b[p]/nv.mx,0.45)*nh);
+    cx.fillRect(p,ny+5+(nh-hh),1,hh);
+  }
+  cx.globalAlpha=1;
+  const rg=Math.max(1,S.maxCyc-S.minCyc);
+  const vx0=(TL.t0-S.minCyc)/rg*W,vx1=(TL.t1-S.minCyc)/rg*W;
+  cx.fillStyle=C.navFill;cx.fillRect(vx0,ny+2,Math.max(2,vx1-vx0),TL.navH-4);
+  cx.strokeStyle=C.acc;cx.lineWidth=1.4;cx.strokeRect(vx0,ny+2.5,Math.max(2,vx1-vx0),TL.navH-5);
+  }
+
+  $('tlRange').textContent=fmt(Math.round(TL.t0))+' → '+fmt(Math.round(TL.t1));
+  $('tlSpan').textContent=fmt(Math.round(span))+' cyc';
+  $('tlDrawn').textContent=fmt(drawn);
+  if(Mini.enabled)miniDraw();
+}
+
+/* =======================================================================
+   6. 流水线事务视图（甘特式）
+   ======================================================================= */
+const PV={cv:null,cx:null,W:0,H:0,dpr:1,rowH:17,scroll:0,list:[],
+  padL:230,padT:34,padR:12,t0:0,t1:1,drag:null,hover:-1};
+const STAGE_COLOR={'PIPE3':'#4ea1ff','DA':'#35c4dc','WB':'#52d38a','ST':'#f0a03c','AW':'#ff8c42',
+  'PF-REQ':'#ff4d6d','L2-CMP':'#b478ff','AXI-AR':'#ffd23f','被使用':'#52d38a','TRAIN':'#ff6fb5','L2':'#b478ff','AR':'#ffd23f'};
+function pvInit(){
+  PV.cv=$('pvCanvas');PV.cx=PV.cv.getContext('2d');
+  new ResizeObserver(()=>{pvResize();pvDraw();}).observe($('pvWrap'));
+  PV.cv.addEventListener('wheel',e=>{
+    e.preventDefault();
+    if(e.ctrlKey||e.metaKey||e.shiftKey){
+      const r=PV.cv.getBoundingClientRect();
+      const x=e.clientX-r.left;
+      const w=PV.W-PV.padL-PV.padR;
+      const c=PV.t0+(x-PV.padL)/w*(PV.t1-PV.t0);
+      const f=e.deltaY>0?1.22:1/1.22;
+      PV.t0=c-(c-PV.t0)*f;PV.t1=c+(PV.t1-c)*f;
+    }else{
+      PV.scroll=Math.max(0,PV.scroll+e.deltaY);
+      const maxS=Math.max(0,PV.list.length*PV.rowH-(PV.H-PV.padT)+20);
+      PV.scroll=Math.min(PV.scroll,maxS);
+    }
+    pvDraw();
+  },{passive:false});
+  PV.cv.addEventListener('mousedown',e=>{
+    const r=PV.cv.getBoundingClientRect();
+    PV.drag={x:e.clientX-r.left,t0:PV.t0,t1:PV.t1};
+  });
+  window.addEventListener('mousemove',e=>{
+    if(PV.drag){
+      const r=PV.cv.getBoundingClientRect();
+      const w=PV.W-PV.padL-PV.padR;
+      const d=(PV.drag.x-(e.clientX-r.left))/w*(PV.drag.t1-PV.drag.t0);
+      PV.t0=PV.drag.t0+d;PV.t1=PV.drag.t1+d;pvDraw();return;
+    }
+    if(Mini.drag)return;
+    if(S.pane!=='pipeline')return;
+    const r=PV.cv.getBoundingClientRect();
+    const x=e.clientX-r.left,y=e.clientY-r.top;
+    if(x<0||y<PV.padT||x>PV.W||y>PV.H){hideTip();if(PV.hover>=0){PV.hover=-1;pvDraw();}return;}
+    const ri=Math.floor((y-PV.padT+PV.scroll)/PV.rowH);
+    if(ri!==PV.hover){PV.hover=ri;pvDraw();}
+    if(ri>=0&&ri<PV.list.length)showTipTxn(PV.list[ri],e.clientX,e.clientY);else hideTip();
+  });
+  window.addEventListener('mouseup',()=>{PV.drag=null;});
+  PV.cv.addEventListener('click',e=>{
+    const r=PV.cv.getBoundingClientRect();
+    const y=e.clientY-r.top;
+    const ri=Math.floor((y-PV.padT+PV.scroll)/PV.rowH);
+    if(ri>=0&&ri<PV.list.length){
+      const o=PV.list[ri];
+      const x=e.clientX-r.left;
+      const w=PV.W-PV.padL-PV.padR;
+      const c=PV.t0+(x-PV.padL)/w*(PV.t1-PV.t0);
+      let best=o.stages[0],bd=1e18;
+      for(const st of o.stages){const d=Math.abs(st.cyc-c);if(d<bd){bd=d;best=st;}}
+      S.hlAddl=o.addl||null;
+      selectEvent(best.idx,false);
+      pvDraw();
+    }
+  });
+  PV.cv.addEventListener('mouseleave',()=>{hideTip();});
+}
+function pvResize(){
+  const r=$('pvWrap').getBoundingClientRect();
+  PV.dpr=window.devicePixelRatio||1;
+  PV.W=Math.max(10,r.width);PV.H=Math.max(10,r.height);
+  PV.cv.width=PV.W*PV.dpr;PV.cv.height=PV.H*PV.dpr;
+  PV.cx.setTransform(PV.dpr,0,0,PV.dpr,0,0);
+}
+function pvBuild(){
+  const kind=$('pvKind').value;
+  // 「同 ADDL 合并」选项仅对缓存行生命周期有意义
+  const mergeWrap=$('pvMergeWrap');
+  if(kind==='line'){mergeWrap.style.display='';}
+  else{mergeWrap.style.display='none';$('pvMerge').checked=false;}
+  let list=(S.txn[kind]||[]).slice();
+  // 合并模式：把同一 ADDL 的所有分段合成一个事务
+  if(kind==='line'&&$('pvMerge').checked){
+    const byAddr=new Map();
+    for(const o of list){
+      const a=o.addl||'';
+      if(!byAddr.has(a))byAddr.set(a,{kind:'line',key:a,addl:a,pc:'',start:o.start,end:o.end,stages:[]});
+      const m=byAddr.get(a);
+      if(o.start<m.start)m.start=o.start;
+      if(o.end>m.end)m.end=o.end;
+      for(const st of o.stages)m.stages.push(st);
+    }
+    list=[...byAddr.values()];
+    for(const o of list){o.stages.sort((a,b)=>a.cyc-b.cyc);o.lat=o.end-o.start;}
+  }
+  // 按可见性过滤：事务中至少一个阶段可见
+  list=list.filter(o=>{for(const st of o.stages)if(S.vis&&S.vis[st.idx])return true;return false;});
+  if($('pvSlow').checked){
+    const l=list.map(o=>o.lat).sort((a,b)=>a-b);
+    const thr=l.length?l[Math.floor(l.length*0.9)]:0;
+    list=list.filter(o=>o.lat>=Math.max(thr,1));
+  }
+  const sort=$('pvSort').value;
+  if(sort==='lat')list=list.slice().sort((a,b)=>b.lat-a.lat);
+  else if(sort==='addr')list=list.slice().sort((a,b)=>(a.addl||'')<(b.addl||'')?-1:1||a.start-b.start);
+  else list=list.slice().sort((a,b)=>a.start-b.start);
+  PV.list=list;
+  $('pvCount').textContent=fmt(list.length);
+  // 图例
+  const seen=[];
+  for(const o of list.slice(0,300))for(const st of o.stages)if(!seen.includes(st.name))seen.push(st.name);
+  $('pvLegend').innerHTML=seen.map(n=>'<span class="lgi"><i style="background:'+(STAGE_COLOR[n]||'#888')+'"></i>'+n+'</span>').join('');
+  if(list.length){
+    let a=Infinity,b=-Infinity;
+    for(const o of list.slice(0,4000)){if(o.start<a)a=o.start;if(o.end>b)b=o.end;}
+    if(!isFinite(a)){a=S.minCyc;b=S.maxCyc;}
+    const sp=Math.max(4,b-a);PV.t0=a-sp*0.02;PV.t1=b+sp*0.02;
+  }
+}
+function pvDraw(){
+  if(!PV.cx)return;
+  const cx=PV.cx,W=PV.W,H=PV.H;
+  const css=getComputedStyle(document.documentElement);
+  const C=palette(css);
+  cx.fillStyle=C.bg;cx.fillRect(0,0,W,H);
+  const list=PV.list;
+  PV.relPts={};   // 记录各阶段块中心坐标，供关联连线使用
+  if(!list.length){cx.fillStyle=C.fg3;cx.font='13px sans-serif';cx.textAlign='center';
+    cx.fillText('当前过滤条件下没有可展示的事务',W/2,H/2);return;}
+  if(W-PV.padL-PV.padR<20||H-PV.padT<20)return;
+  const plotX=PV.padL,plotW=W-PV.padL-PV.padR;
+  const span=PV.t1-PV.t0;
+  const X=c=>plotX+(c-PV.t0)/span*plotW;
+  const mono=css.getPropertyValue('--mono');
+
+  /* 时间轴 */
+  let step=Math.pow(10,Math.floor(Math.log10(span/plotW*90)));
+  for(const m of [1,2,5,10]){if(step*m*plotW/span>=90){step=step*m;break;}}
+  cx.save();cx.beginPath();cx.rect(plotX,0,plotW,H);cx.clip();
+  cx.font='10px '+mono;cx.textAlign='left';
+  for(let c=Math.ceil(PV.t0/step)*step;c<PV.t1;c+=step){
+    const x=X(c);
+    cx.strokeStyle=C.line;cx.beginPath();cx.moveTo(x+.5,PV.padT);cx.lineTo(x+.5,H);cx.stroke();
+    cx.fillStyle=C.fg3;cx.fillText(fmt(Math.round(c)),x+3,20);
+  }
+  cx.restore();
+  cx.fillStyle=C.bg2;cx.fillRect(0,0,W,PV.padT);
+  cx.strokeStyle=C.line2;cx.beginPath();cx.moveTo(0,PV.padT-.5);cx.lineTo(W,PV.padT-.5);cx.stroke();
+  cx.fillStyle=C.fg3;cx.font='10px '+mono;cx.textAlign='left';
+  for(let c=Math.ceil(PV.t0/step)*step;c<PV.t1;c+=step){cx.fillText(fmt(Math.round(c)),X(c)+3,20);}
+  cx.fillStyle=C.fg2;cx.font='700 10px '+css.getPropertyValue('--sans');
+  cx.fillText('事务（每行一条）',8,20);
+  cx.fillText('周期 →',plotX-58,20);
+
+  const first=Math.max(0,Math.floor(PV.scroll/PV.rowH));
+  const last=Math.min(list.length,first+Math.ceil((H-PV.padT)/PV.rowH)+1);
+  const rh=PV.rowH;
+
+  for(let i=first;i<last;i++){
+    const o=list[i];
+    const y=PV.padT+i*rh-PV.scroll;
+    if(y+rh<PV.padT||y>H)continue;
+    if(i%2===0){cx.fillStyle=C.bg2;cx.fillRect(0,y,W,rh);}
+    const isHov=i===PV.hover;
+    const isHl=S.hlAddl&&o.addl===S.hlAddl;
+    if(isHl){cx.fillStyle=C.navFill;cx.fillRect(0,y,W,rh);}
+    if(isHov){cx.fillStyle=C.rowHi;cx.fillRect(0,y,W,rh);}
+
+    /* 左侧标签 */
+    cx.textAlign='left';cx.font='10px '+mono;
+    cx.fillStyle=C.fg2;
+    let lab='';
+    if(o.kind==='load'||o.kind==='store')lab='pc:'+(o.pc||'----')+' iid:'+(o.key||'--');
+    else lab='line:'+(o.addl||'');
+    cx.fillText(lab,8,y+rh/2+3.5);
+    cx.textAlign='right';
+    cx.fillStyle=o.lat>20?'#ff5f6d':(o.lat>8?'#f0a03c':C.fg3);
+    cx.fillText(o.lat+'c',PV.padL-8,y+rh/2+3.5);
+    if(o.kind==='load'){
+      cx.textAlign='left';cx.font='9px '+mono;
+      if(o.addl){cx.fillStyle=C.fg3;cx.fillText((o.addl||'').slice(-7),118,y+rh/2+3.5);}
+      if(o.miss){cx.fillStyle='#ff5f6d';cx.fillText('L1 MISS',176,y+rh/2+3.5);}
+      else if(o.partial){cx.fillStyle='#f0a03c';cx.fillText('无WB',176,y+rh/2+3.5);}
+    }
+    if(o.kind==='prefetch'){
+      cx.textAlign='left';cx.font='9px '+mono;
+      let s,col;
+      if(!o.accepted){s='✕反压';col='#ff5f6d';}
+      else if(o.useful){s='✓及时';col='#52d38a';}
+      else if(o.early){s='◇过早';col='#f0a03c';}
+      else {s='○未用';col='#6b7889';}
+      cx.fillStyle=col;cx.fillText(s,150,y+rh/2+3.5);
+    }
+    if(o.kind==='store'&&o.awShare>1){
+      cx.textAlign='left';cx.font='9px '+mono;cx.fillStyle='#f0a03c';
+      cx.fillText('AW×'+o.awShare,176,y+rh/2+3.5);
+    }
+
+    /* 阶段块 */
+    cx.save();cx.beginPath();cx.rect(plotX,PV.padT,plotW,H-PV.padT);cx.clip();
+    const bh=Math.max(5,rh-5);
+    const by=y+(rh-bh)/2;
+    // 连接底线
+    if(o.stages.length>1){
+      const xa=X(o.stages[0].cyc),xb=X(o.stages[o.stages.length-1].cyc);
+      cx.strokeStyle=C.line2;cx.lineWidth=1;cx.globalAlpha=.65;
+      cx.beginPath();cx.moveTo(xa,y+rh/2);cx.lineTo(xb,y+rh/2);cx.stroke();cx.globalAlpha=1;
+    }
+    for(let k=0;k<o.stages.length;k++){
+      const st=o.stages[k];
+      const x0=X(st.cyc);
+      const x1=k+1<o.stages.length?X(o.stages[k+1].cyc):x0+Math.max(3,plotW/span*1);
+      let w=Math.max(2.5,x1-x0);
+      if(x0>plotX+plotW+30||x0+w<plotX-30)continue;
+      const isSel=st.idx===S.sel;
+      const isRel=S.relSet&&S.relSet.has(st.idx);
+      PV.relPts[st.idx]={x:x0+w/2,y:by+bh/2};
+      cx.fillStyle=STAGE_COLOR[st.name]||tagMeta(st.tag).color;
+      cx.globalAlpha=(S.vis&&!S.vis[st.idx])?0.32:(isRel||isSel?1:0.95);
+      cx.fillRect(x0,by,w,bh);
+      if(isSel){cx.strokeStyle=C.markHi;cx.lineWidth=1.5;cx.strokeRect(x0-1,by-1,w+2,bh+2);}
+      else if(isRel){cx.strokeStyle=C.rel;cx.lineWidth=1.4;cx.strokeRect(x0-1,by-1,w+2,bh+2);}
+      cx.globalAlpha=1;
+      if(w>=30&&bh>=11){
+        cx.fillStyle=C.onBar;cx.font='9px '+mono;cx.textAlign='left';
+        cx.fillText(st.name,x0+3,by+bh/2+3);
+      }
+    }
+    cx.restore();
+  }
+
+  /* 关联高亮连线（同PC / 同ADDL） */
+  if(S.relSet){
+    const sp=PV.relPts[S.sel];
+    if(sp){
+      cx.save();
+      cx.beginPath();cx.rect(plotX,PV.padT,plotW,H-PV.padT);cx.clip();
+      cx.lineWidth=1.3;cx.strokeStyle=C.rel;cx.globalAlpha=.8;cx.setLineDash([4,3]);
+      let n=0;
+      for(const j of S.relSet){
+        if(n++>=REL_MAX)break;
+        const p=PV.relPts[j];if(!p)continue;
+        cx.beginPath();cx.moveTo(sp.x,sp.y);cx.lineTo(p.x,p.y);cx.stroke();
+      }
+      cx.setLineDash([]);cx.globalAlpha=1;cx.fillStyle=C.rel;n=0;
+      for(const j of S.relSet){
+        if(n++>=REL_MAX)break;
+        const p=PV.relPts[j];if(!p)continue;
+        cx.beginPath();cx.arc(p.x,p.y,3.4,0,7);cx.fill();
+        cx.lineWidth=1.3;cx.strokeStyle=C.bg;cx.stroke();
+      }
+      cx.restore();
+    }
+  }
+
+  /* 滚动条 */
+  const total=list.length*rh,viewH=H-PV.padT;
+  if(total>viewH){
+    const th=Math.max(24,viewH/total*viewH);
+    const ty=PV.padT+(PV.scroll/(total-viewH))*(viewH-th);
+    cx.fillStyle=C.line2;
+    cx.fillRect(W-7,ty,5,th);
+  }
+  cx.strokeStyle=C.line2;cx.beginPath();cx.moveTo(plotX-.5,PV.padT);cx.lineTo(plotX-.5,H);cx.stroke();
+  if(Mini.enabled)miniDraw();
+}
+
+/* =======================================================================
+   7. 事件表（虚拟滚动）
+   ======================================================================= */
+const TB={rowH:24,cols:[],scroll:0};
+function tbCols(){
+  if($('tbCols').value==='all'){
+    const c=[{k:'__t',w:110,n:'周期'},{k:'__tag',w:132,n:'事件类型'}];
+    for(const f of S.allFields)c.push({k:f,w:Math.max(64,f.length*9+26),n:f});
+    return c;
+  }
+  return [{k:'__t',w:110,n:'周期'},{k:'__raw',w:130,n:'原始时间'},{k:'__tag',w:140,n:'事件类型'},
+    {k:'PC',w:74,n:'PC'},{k:'ADDL',w:108,n:'ADDL 缓存行'},{k:'ADDB',w:108,n:'ADDB'},
+    {k:'IID',w:56,n:'IID'},{k:'__rest',w:640,n:'其他字段'}];
+}
+function tbRender(){
+  TB.cols=tbCols();
+  const head=$('tbHead');
+  head.innerHTML=TB.cols.map(c=>'<div style="width:'+c.w+'px">'+c.n+'</div>').join('');
+  const sc=$('tbScroll'),body=$('tbBody');
+  const n=S.visIdx.length;
+  $('tbCount').textContent=fmt(n);
+  body.style.height=(n*TB.rowH)+'px';
+  const totalW=TB.cols.reduce((a,c)=>a+c.w,0);
+  head.style.width=totalW+'px';
+  body.style.width=totalW+'px';
+  const draw=()=>{
+    const top=sc.scrollTop,h=sc.clientHeight;
+    const f=Math.max(0,Math.floor(top/TB.rowH)-4);
+    const l=Math.min(n,Math.ceil((top+h)/TB.rowH)+4);
+    let html='';
+    for(let i=f;i<l;i++){
+      const gi=S.visIdx[i],e=S.raw[gi];
+      html+='<div class="vtrow'+(gi===S.sel?' sel':'')+'" style="top:'+(i*TB.rowH)+'px;height:'+TB.rowH+'px" data-i="'+gi+'">';
+      for(const c of TB.cols){
+        let v='';
+        if(c.k==='__t')v=fmt(e.cyc);
+        else if(c.k==='__raw')v=e.t;
+        else if(c.k==='__tag')v='<span style="color:'+tagMeta(e.tag).color+'">■</span> '+e.tag;
+        else if(c.k==='__rest'){
+          const skip={PC:1,ADDL:1,ADDB:1,IID:1};
+          const ps=[];for(const k in e.d)if(!skip[k])ps.push(k+':'+e.d[k]);
+          v='<span style="color:var(--fg3)">'+ps.join(' ')+'</span>';
+        }
+        else v=e.d[c.k]!==undefined?e.d[c.k]:'';
+        html+='<div style="width:'+c.w+'px">'+v+'</div>';
+      }
+      html+='</div>';
+    }
+    body.innerHTML=html;
+  };
+  sc.onscroll=draw;
+  draw();
+  body.onclick=ev=>{
+    const r=ev.target.closest('.vtrow');
+    if(r)selectEvent(+r.dataset.i);
+  };
+}
+
+/* =======================================================================
+   8. 详情面板
+   ======================================================================= */
+function selectEvent(i,scroll=true){
+  S.sel=i;
+  const e=S.raw[i];
+  S.hlAddl=e.d.ADDL||null;
+  const m=tagMeta(e.tag);
+  $('dTitle').innerHTML='<span style="color:'+m.color+'">■</span> '+m.label;
+  let h='';
+  h+='<div class="dsec">基本信息</div><table class="dtable">';
+  h+='<tr><td>事件类型</td><td><b>'+e.tag+'</b></td></tr>';
+  h+='<tr><td>周期</td><td>'+fmt(e.cyc)+'</td></tr>';
+  h+='<tr><td>原始时间</td><td>'+e.t+'</td></tr>';
+  h+='<tr><td>源文件行</td><td>'+e.ln+'</td></tr>';
+  h+='</table>';
+  if(m.desc)h+='<div style="font-size:11px;color:var(--fg2);line-height:1.65;margin-top:8px;padding:7px 9px;background:var(--bg3);border-radius:6px">'+m.desc+'</div>';
+
+  // 关联高亮摘要（先行计算以展示匹配键与相关事件数）
+  computeRel();
+  if(S.relMode!=='none'&&S.sel>=0){
+    const rlabel=S.relMode==='pc'?'同 PC':'同 ADDL（缓存行）';
+    const rkey=S.relMode==='pc'?(e.d.PC||'(空)'):(e.d.ADDL||'(空)');
+    h+='<div class="dsec">关联高亮 · '+rlabel+'</div><table class="dtable">'
+      +'<tr><td>匹配键</td><td><b>'+rkey+'</b></td></tr>'
+      +'<tr><td>可见相关事件</td><td><b style="color:var(--rel)">'+fmt(S.relCount)+'</b> 个</td></tr></table>';
+    if(S.relCount>0){
+      h+='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px">';
+      let n=0;
+      for(const j of S.relSet){
+        if(n>=16)break;
+        const o=S.raw[j];
+        h+='<button class="rel" data-i="'+j+'">'+fmt(o.cyc)+' '+o.tag+'</button>';n++;
+      }
+      if(S.relCount>16)h+='<span style="color:var(--fg3);font-size:10px;align-self:center">…共 '+S.relCount+' 个</span>';
+      h+='</div>';
+    }
+  }
+
+  h+='<div class="dsec">字段</div><table class="dtable">';
+  for(const k in e.d){
+    const fm=fieldMeta(k);
+    const v=e.d[k];
+    const vl=valLabel(e.tag,k,v);
+    h+='<tr><td title="'+(fm.label||k)+'">'+k+'</td><td><b>'+v+'</b>';
+    if(vl)h+=' <span style="color:var(--acc2)">'+vl+'</span>';
+    if(fm.label&&fm.label!==k)h+='<div style="color:var(--fg3);font-size:10px">'+fm.label+'</div>';
+    if(fm.hex){const n=parseInt(v,16);if(isFinite(n))h+='<div style="color:var(--fg3);font-size:10px">十进制 '+fmt(n)+'</div>';}
+    if(fm.bits||fm.bin||fm.onehot){
+      const bits=fm.bin?v.split(''):(parseInt(v,16)>>>0).toString(2).padStart(Math.max(4,v.length*4),'0').split('');
+      h+='<div class="bits">';
+      for(let bi=0;bi<bits.length;bi++){
+        const b=bits[bi]==='1';
+        h+='<span class="bit '+(b?'one':'zero')+'" title="bit'+(bits.length-1-bi)+'">'+bits[bi]+'</span>';
+      }
+      h+='</div>';
+      const set=[];
+      for(let bi=0;bi<bits.length;bi++)if(bits[bi]==='1')set.push('bit'+(bits.length-1-bi));
+      if(set.length)h+='<div style="color:var(--acc2);font-size:10px">置位：'+set.join(', ')+'</div>';
+    }
+    h+='</td></tr>';
+  }
+  h+='</table>';
+
+  // 关联事件
+  if(e.d.IID!==undefined){
+    const near=[];
+    for(let j=Math.max(0,i-400);j<Math.min(S.raw.length,i+400);j++){
+      const o=S.raw[j];
+      if(o.d.IID===e.d.IID&&Math.abs(o.cyc-e.cyc)<=200)near.push(j);
+    }
+    if(near.length>1){
+      h+='<div class="dsec">同 IID='+e.d.IID+' 的流水线阶段</div>';
+      for(const j of near){
+        const o=S.raw[j];
+        h+='<button class="rel" data-i="'+j+'"><span style="color:'+tagMeta(o.tag).color+'">■</span> '
+          +fmt(o.cyc)+' <b>'+tagMeta(o.tag).stage+'</b> '+o.tag
+          +(j===i?' <span style="color:var(--acc)">◀ 当前</span>':'')
+          +' <span style="color:var(--fg3)">'+(o.cyc-e.cyc>=0?'+':'')+(o.cyc-e.cyc)+'c</span></button>';
+      }
+    }
+  }
+  if(e.d.ADDL!==undefined){
+    const arr=S.byAddl.get(e.d.ADDL)||[];
+    const near=arr.filter(j=>Math.abs(S.raw[j].cyc-e.cyc)<=3000).slice(0,40);
+    if(near.length>1){
+      h+='<div class="dsec">同缓存行 '+e.d.ADDL+'（±3000 周期，共 '+arr.length+' 次访问）</div>';
+      for(const j of near){
+        const o=S.raw[j];
+        h+='<button class="rel" data-i="'+j+'"><span style="color:'+tagMeta(o.tag).color+'">■</span> '
+          +fmt(o.cyc)+' '+o.tag+(o.d.PC?' pc:'+o.d.PC:'')
+          +(j===i?' <span style="color:var(--acc)">◀</span>':'')+'</button>';
+      }
+    }
+  }
+  $('dBody').innerHTML=h;
+  $('detail').classList.add('on');
+  $('dBody').querySelectorAll('.rel').forEach(b=>b.onclick=()=>selectEvent(+b.dataset.i));
+
+  if(scroll&&S.pane==='timeline'){
+    if(e.cyc<TL.t0||e.cyc>TL.t1){
+      const sp=TL.t1-TL.t0;TL.t0=e.cyc-sp/2;TL.t1=e.cyc+sp/2;
+    }
+  }
+  redraw();
+  if(S.pane==='table')tbRender();
+}
+
+/* 计算与当前选中事件相关的事件集合（按 PC 或 ADDL），仅纳入可见事件。
+   结果存入 S.relSet（全局下标集合，不含选中自身）与 S.relCount，供各视图高亮/连线。 */
+function computeRel(){
+  S.relSet=null;S.relCount=0;
+  if(S.relMode==='none'||S.sel<0||!S.raw.length)return;
+  const e=S.raw[S.sel];
+  const key=S.relMode==='pc'?(e.d.PC||null):(e.d.ADDL||null);
+  if(key===null)return;
+  const set=new Set();
+  for(const j of S.visIdx){
+    if(j===S.sel)continue;
+    const o=S.raw[j];
+    const k=S.relMode==='pc'?o.d.PC:o.d.ADDL;
+    if(k===key)set.add(j);
+  }
+  S.relSet=set;S.relCount=set.size;
+}
+
+/* =======================================================================
+   9. 提示气泡
+   ======================================================================= */
+function showTip(html,x,y){
+  const t=$('tip');
+  t.innerHTML=html;t.style.display='block';
+  const r=t.getBoundingClientRect();
+  let nx=x+14,ny=y+14;
+  if(nx+r.width>innerWidth-8)nx=x-r.width-14;
+  if(ny+r.height>innerHeight-8)ny=y-r.height-14;
+  t.style.left=Math.max(4,nx)+'px';t.style.top=Math.max(4,ny)+'px';
+}
+function hideTip(){$('tip').style.display='none';}
+function showTipEvent(i,x,y){
+  const e=S.raw[i],m=tagMeta(e.tag);
+  let h='<div class="t">'+m.label+' <span style="color:var(--fg3);font-weight:400">'+e.tag+'</span></div>';
+  h+='<div class="kv">周期 <b>'+fmt(e.cyc)+'</b>　行 '+e.ln+'</div>';
+  const keys=Object.keys(e.d).slice(0,14);
+  for(const k of keys){
+    const vl=valLabel(e.tag,k,e.d[k]);
+    h+='<div class="kv">'+k.padEnd(6,' ')+' <b>'+e.d[k]+'</b>'+(vl?' <span style="color:var(--acc2)">'+vl+'</span>':'')+'</div>';
+  }
+  if(Object.keys(e.d).length>14)h+='<div class="kv" style="color:var(--fg3)">…点击查看全部</div>';
+  showTip(h,x,y);
+}
+function showTipTxn(o,x,y){
+  let h='<div class="t">';
+  h+=o.kind==='load'?'Load 指令流水线':o.kind==='store'?'Store 指令':o.kind==='prefetch'?'预取生命周期':'缓存行生命周期';
+  h+='</div>';
+  if(o.pc)h+='<div class="kv">PC <b>'+o.pc+'</b></div>';
+  if(o.key&&o.kind!=='line'&&o.kind!=='prefetch')h+='<div class="kv">IID <b>'+o.key+'</b></div>';
+  if(o.addl)h+='<div class="kv">缓存行 <b>'+o.addl+'</b></div>';
+  h+='<div class="kv">起始 <b>'+fmt(o.start)+'</b>　总跨度 <b>'+o.lat+'</b> 周期</div>';
+  if(o.kind==='prefetch'){
+    h+='<div class="kv">L2 接收 <b>'+(o.accepted?'是':'否（反压，后续阶段不予关联）')+'</b></div>';
+    if(o.usedLater){
+      h+='<div class="kv">后续被访问 <b>是</b>，提前 <b>'+fmt(o.lead)+'</b> 周期</div>';
+      h+='<div class="kv">判定 <b style="color:'+(o.useful?'#52d38a':'#f0a03c')+'">'
+        +(o.useful?'及时有用':'过早（超出 '+fmt(S.win.pfLead)+' 周期窗口，大概率已被替换）')+'</b></div>';
+    }else h+='<div class="kv">后续被访问 <b style="color:var(--fg3)">否</b></div>';
+  }
+  if(o.kind==='load'){
+    if(o.wbFrom)h+='<div class="kv">写回来源 <b>'+o.wbFrom+'</b>　数据 <b>'+(o.data||'')+'</b></div>';
+    if(o.miss)h+='<div class="kv" style="color:#ff5f6d">L1 未命中：无 DA 前递，数据由回填缓冲供给</div>';
+    if(o.partial)h+='<div class="kv" style="color:#f0a03c">未观测到 WB（IID 被复用或 trace 截断）</div>';
+  }
+  if(o.kind==='store'&&o.awShare>1)
+    h+='<div class="kv" style="color:#f0a03c">该 AW 同时被 '+o.awShare+' 条 Store 关联，属弱关联</div>';
+  h+='<div class="kv" style="margin-top:4px;color:var(--fg3)">阶段：</div>';
+  let prev=null;
+  for(const st of o.stages){
+    h+='<div class="kv">　<span style="color:'+(STAGE_COLOR[st.name]||'#888')+'">■</span> '+st.name
+      +' @ <b>'+fmt(st.cyc)+'</b>'+(prev!==null?' <span style="color:var(--fg3)">(+'+(st.cyc-prev)+'c)</span>':'')+'</div>';
+    prev=st.cyc;
+  }
+  showTip(h,x,y);
+}
+
+/* =======================================================================
+   10. 统计分析
+   ======================================================================= */
+function barRow(label,val,max,extra){
+  return '<tr><td>'+label+'</td><td class="num">'+fmt(val)+'</td>'
+    +'<td style="width:38%"><div class="bar"><i style="width:'+(max?val/max*100:0).toFixed(1)+'%"></i></div></td>'
+    +'<td class="num" style="color:var(--fg3)">'+(extra||'')+'</td></tr>';
+}
+function statsRender(){
+  const raw=S.raw,idx=S.visIdx;
+  if(!raw.length){$('statsBody').innerHTML='<div class="empty">请先加载 Trace 文件</div>';return;}
+  const n=idx.length;
+  let h='';
+
+  /* 概览卡片 */
+  const spanC=S.maxCyc-S.minCyc;
+  const lines=new Set(),pcs=new Set();
+  for(const i of idx){if(raw[i].d.ADDL)lines.add(raw[i].d.ADDL);if(raw[i].d.PC)pcs.add(raw[i].d.PC);}
+  const loads=S.txn.load,pfs=S.txn.prefetch;
+  const done=loads.filter(o=>o.done);              // 只有观测到 WB 的才计入延迟统计
+  const lat=done.map(o=>o.lat).sort((a,b)=>a-b);
+  const q=p=>lat.length?lat[Math.min(lat.length-1,Math.floor(lat.length*p))]:0;
+  const missN=done.filter(o=>o.miss).length;
+  const partN=loads.length-done.length;
+  const pfAcc=pfs.filter(o=>o.accepted).length;
+  const pfUse=pfs.filter(o=>o.useful).length;
+  const pfEarly=pfs.filter(o=>o.early).length;
+  const leads=pfs.filter(o=>o.usedLater).map(o=>o.lead).sort((a,b)=>a-b);
+  const ql=p=>leads.length?leads[Math.min(leads.length-1,Math.floor(leads.length*p))]:0;
+
+  h+='<div class="cards">';
+  const card=(l,v,s,c)=>'<div class="card"><div class="lb">'+l+'</div><div class="vl"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div>'+(s?'<div class="sb">'+s+'</div>':'')+'</div>';
+  h+=card('可见事件',fmt(n),'总计 '+fmt(raw.length));
+  h+=card('周期跨度',fmt(spanC),'1 cyc = '+fmt(S.cycUnit)+' 时间单位');
+  h+=card('缓存行数',fmt(lines.size),'不同 ADDL');
+  h+=card('访存 PC 数',fmt(pcs.size),'不同指令地址');
+  h+=card('Load 完成',fmt(done.length),partN?('另有 '+fmt(partN)+' 条未观测到 WB'):'全部观测到 WB');
+  h+=card('Load 延迟 P50 / P99',q(.5)+' / '+q(.99),'最大 '+(lat.length?lat[lat.length-1]:0)+' 周期');
+  h+=card('L1 未命中',fmt(missN),pct(missN,done.length)+'（无 DA 前递，走 RB）',missN?'#ff5f6d':null);
+  if(pfs.length){
+    h+=card('预取请求',fmt(pfs.length),'L2 接收率 '+pct(pfAcc,pfs.length));
+    h+=card('及时有用预取',pct(pfUse,pfs.length),'提前量 ≤ '+fmt(S.win.pfLead)+' 周期',pfUse/pfs.length>.5?'#52d38a':'#f0a03c');
+    h+=card('过早预取',pct(pfEarly,pfs.length),'被访问时已远超窗口','#f0a03c');
+  }
+  h+='</div>';
+
+  /* 事件分布 */
+  const cnt={};for(const i of idx)cnt[raw[i].tag]=(cnt[raw[i].tag]||0)+1;
+  const ents=Object.entries(cnt).sort((a,b)=>b[1]-a[1]);
+  const mx=ents.length?ents[0][1]:1;
+  h+='<div class="grid2">';
+  h+='<div class="panel"><h4>事件类型分布</h4><table class="st"><tr><th>类型</th><th class="num">数量</th><th></th><th class="num">占比</th></tr>';
+  for(const [t,c] of ents){
+    h+=barRow('<span style="color:'+tagMeta(t).color+'">■</span> '+t+' <span style="color:var(--fg3)">'+tagMeta(t).label+'</span>',c,mx,pct(c,n));
+  }
+  h+='</table></div>';
+
+  /* Load 延迟直方图 */
+  if(lat.length){
+    const hist={};for(const l of lat)hist[l]=(hist[l]||0)+1;
+    const hs=Object.entries(hist).map(([k,v])=>[+k,v]).sort((a,b)=>a[0]-b[0]);
+    const hmx=Math.max(...hs.map(x=>x[1]));
+    const missLat=done.filter(o=>o.miss).map(o=>o.lat).sort((a,b)=>a-b);
+    h+='<div class="panel"><h4>Load 流水线延迟分布（PIPE3 → WB）</h4>'
+      +'<div class="hint">仅统计观测到 WB 的 '+fmt(done.length)+' 条事务。'
+      +'延迟集中在典型值说明 L1 命中；长尾由 L1 未命中造成——这些事务没有 DA 前递阶段，数据经回填缓冲（FROM=RB）返回。</div>'
+      +'<table class="st"><tr><th>延迟(周期)</th><th class="num">次数</th><th></th><th class="num">占比</th></tr>';
+    for(const [l,c] of hs.slice(0,22))h+=barRow(l+' cyc',c,hmx,pct(c,lat.length));
+    h+='</table>'
+      +'<div style="margin-top:9px;font-size:11px;color:var(--fg2);font-family:var(--mono)">'
+      +'P50 '+q(.5)+' · P90 '+q(.9)+' · P99 '+q(.99)+' · Max '+lat[lat.length-1]+' 周期</div>';
+    if(missLat.length){
+      h+='<div style="margin-top:9px;padding:8px 10px;background:rgba(255,95,109,.09);border:1px solid rgba(255,95,109,.3);border-radius:6px;font-size:11px;line-height:1.7">'
+        +'<b style="color:#ff5f6d">L1 未命中事务（'+missLat.length+' 条，占 '+pct(missLat.length,done.length)+'）</b><br>'
+        +'<span style="font-family:var(--mono)">延迟 min '+missLat[0]+' · 中位 '+missLat[Math.floor(missLat.length/2)]
+        +' · max '+missLat[missLat.length-1]+' 周期</span><br>'
+        +'<span style="color:var(--fg2)">相对 L1 命中的 '+q(.5)+' 周期，未命中额外开销约 '
+        +(missLat[Math.floor(missLat.length/2)]-q(.5))+' 周期。这是预取器真正要消除的目标。</span></div>';
+    }
+    h+='</div>';
+  }
+  h+='</div>';
+
+  /* 预取分析 */
+  if(pfs.length){
+    const inL2=pfs.filter(o=>o.stages.some(s=>s.name==='L2-CMP')).length;
+    const inAR=pfs.filter(o=>o.stages.some(s=>s.name==='AXI-AR')).length;
+    const never=pfs.length-pfs.filter(o=>o.usedLater).length;
+    h+='<div class="panel"><h4>Triverse 预取器效果分析</h4>'
+      +'<div class="hint">按 ADDL 追踪每条预取请求的去向。请注意：除 READY 外，后续阶段都是'
+      +'<b style="color:var(--warn)">按地址+时间邻近推断</b>的启发式关联，窗口取值见侧栏「关联窗口」，'
+      +'结论对窗口敏感，务必结合 RTL 语义判读。</div>';
+    h+='<div class="cards" style="margin-bottom:11px">';
+    h+=card('预取请求总数',fmt(pfs.length),'');
+    h+=card('L2 接收',fmt(pfAcc),pct(pfAcc,pfs.length));
+    h+=card('被反压丢弃',fmt(pfs.length-pfAcc),pct(pfs.length-pfAcc,pfs.length),pfs.length-pfAcc?'#ff5f6d':null);
+    h+=card('进入 L2 流水线',fmt(inL2),'窗口 '+fmt(S.win.l2cmp)+' cyc');
+    h+=card('触发 AXI 读',fmt(inAR),'窗口 '+fmt(S.win.axiar)+' cyc');
+    h+=card('从未被访问',fmt(never),pct(never,pfs.length));
+    h+='</div>';
+
+    /* 四象限判定 */
+    const quad=[
+      ['✓ 及时有用',pfUse,'#52d38a','被接收，且在 '+fmt(S.win.pfLead)+' 周期内被真实访问 —— 真正隐藏了延迟'],
+      ['◇ 过早预取',pfEarly,'#f0a03c','虽被访问，但提前量过大，该行很可能已被替换，收益存疑'],
+      ['○ 从未使用',never,'#6b7889','预取进来后没有任何访问 —— 纯粹的带宽与容量浪费'],
+      ['✕ 被反压',pfs.length-pfAcc,'#ff5f6d','L2 未接收（READY=0），请求直接丢弃']
+    ];
+    const qmx=Math.max(...quad.map(x=>x[1]),1);
+    h+='<h4 style="margin-top:13px">预取结果四象限</h4>'
+      +'<table class="st"><tr><th>判定</th><th class="num">数量</th><th></th><th class="num">占比</th></tr>';
+    for(const [lb,v,c,tip] of quad){
+      h+='<tr title="'+tip+'"><td><span style="color:'+c+'">'+lb+'</span>'
+        +'<div style="color:var(--fg3);font-size:10px;font-family:var(--sans)">'+tip+'</div></td>'
+        +'<td class="num">'+fmt(v)+'</td>'
+        +'<td style="width:30%"><div class="bar"><i style="width:'+(v/qmx*100).toFixed(1)+'%;background:'+c+'"></i></div></td>'
+        +'<td class="num">'+pct(v,pfs.length)+'</td></tr>';
+    }
+    h+='</table>';
+
+    if(leads.length){
+      const buckets=[[0,16],[16,64],[64,256],[256,1024],[1024,4096],[4096,16384],[16384,Infinity]];
+      const bc=buckets.map(()=>0);
+      for(const l of leads){for(let i=0;i<buckets.length;i++)if(l>=buckets[i][0]&&l<buckets[i][1]){bc[i]++;break;}}
+      const bmx=Math.max(...bc,1);
+      h+='<h4 style="margin-top:15px">预取提前量（Timeliness）累积分布</h4>'
+        +'<div class="hint">预取发出到该行首次被真实访问之间的周期数，统计口径为「曾被访问过」的 '+fmt(leads.length)+' 条。'
+        +'提前量太小来不及隐藏延迟；太大则在被用到之前就可能已被替换出 L2。下表同时给出不同判定阈值下的有用率，'
+        +'可直观看出<b style="color:var(--warn)">这个指标对阈值有多敏感</b>。</div>'
+        +'<table class="st"><tr><th>提前量区间</th><th class="num">次数</th><th></th><th class="num">占比</th></tr>';
+      for(let i=0;i<buckets.length;i++){
+        const lb=buckets[i][1]===Infinity?('≥ '+fmt(buckets[i][0])+' cyc'):(fmt(buckets[i][0])+' – '+fmt(buckets[i][1])+' cyc');
+        const isCur=buckets[i][0]<S.win.pfLead;
+        h+=barRow((isCur?'<span style="color:var(--ok)">':'<span style="color:var(--warn)">')+lb+'</span>',bc[i],bmx,pct(bc[i],leads.length));
+      }
+      h+='</table>'
+        +'<div style="margin-top:9px;font-size:11px;color:var(--fg2);font-family:var(--mono)">'
+        +'P10 '+fmt(ql(.1))+' · P25 '+fmt(ql(.25))+' · P50 '+fmt(ql(.5))+' · P75 '+fmt(ql(.75))
+        +' · P90 '+fmt(ql(.9))+' · Max '+fmt(leads[leads.length-1])+' 周期</div>';
+      /* 阈值敏感性 */
+      h+='<div style="margin-top:11px"><b style="font-size:11.5px">判定阈值敏感性</b>'
+        +'<table class="st" style="margin-top:5px"><tr><th>提前量阈值</th><th class="num">及时有用数</th><th></th><th class="num">占全部预取</th></tr>';
+      for(const w of [64,256,1024,4096,16384,Infinity]){
+        const c2=leads.filter(l=>l<=w).length;
+        const lb=w===Infinity?'不限（最宽松口径）':'≤ '+fmt(w)+' cyc';
+        h+='<tr'+(w===S.win.pfLead?' style="background:var(--rowHi)"':'')+'>'
+          +'<td>'+lb+(w===S.win.pfLead?' <span style="color:var(--acc)">◀ 当前</span>':'')+'</td>'
+          +'<td class="num">'+fmt(c2)+'</td>'
+          +'<td style="width:30%"><div class="bar"><i style="width:'+(c2/pfs.length*100).toFixed(1)+'%"></i></div></td>'
+          +'<td class="num">'+pct(c2,pfs.length)+'</td></tr>';
+      }
+      h+='</table></div>';
+    }
+    h+='</div>';
+  }
+
+  /* 交叉表 */
+  const tags=[...new Set(idx.map(i=>raw[i].tag))];
+  h+='<div class="grid2">';
+  // Top PC
+  const pcc={};for(const i of idx){const p=raw[i].d.PC;if(p!==undefined)pcc[p]=(pcc[p]||0)+1;}
+  const pce=Object.entries(pcc).sort((a,b)=>b[1]-a[1]).slice(0,18);
+  if(pce.length){
+    const m2=pce[0][1];
+    h+='<div class="panel"><h4>热点指令 PC（Top 18）</h4><table class="st"><tr><th>PC</th><th class="num">事件数</th><th></th><th class="num">占比</th></tr>';
+    for(const [p,c] of pce)h+=barRow('0x'+p,c,m2,pct(c,n));
+    h+='</table></div>';
+  }
+  // Top cacheline
+  const lc={};for(const i of idx){const a=raw[i].d.ADDL;if(a!==undefined)lc[a]=(lc[a]||0)+1;}
+  const lce=Object.entries(lc).sort((a,b)=>b[1]-a[1]).slice(0,18);
+  if(lce.length){
+    const m3=lce[0][1];
+    h+='<div class="panel"><h4>热点缓存行（Top 18）</h4>'
+      +'<div class="hint">点击行可在时序图中高亮该缓存行的全部事件。</div>'
+      +'<table class="st"><tr><th>ADDL</th><th class="num">访问数</th><th></th><th class="num">占比</th></tr>';
+    for(const [a,c] of lce)h+='<tr style="cursor:pointer" data-addl="'+a+'"><td>0x'+a+'</td><td class="num">'+fmt(c)+'</td>'
+      +'<td style="width:38%"><div class="bar"><i style="width:'+(c/m3*100).toFixed(1)+'%"></i></div></td>'
+      +'<td class="num" style="color:var(--fg3)">'+pct(c,n)+'</td></tr>';
+    h+='</table></div>';
+  }
+  h+='</div>';
+
+  /* 每个事件类型的字段取值分布 */
+  h+='<div class="panel"><h4>各事件类型字段取值分布</h4>'
+    +'<div class="hint">只列出取值种类少于 12 种的枚举型字段，便于快速判断编码含义。可在「语义字典」页为这些取值配置中文标签。</div>';
+  for(const t of tags){
+    const sub=idx.filter(i=>raw[i].tag===t);
+    if(!sub.length)continue;
+    const fs=S.fieldsByTag[t]||[];
+    const rows=[];
+    for(const f of fs){
+      const c={};for(const i of sub){const v=raw[i].d[f];if(v!==undefined)c[v]=(c[v]||0)+1;}
+      const e2=Object.entries(c).sort((a,b)=>b[1]-a[1]);
+      if(e2.length<=12&&e2.length>0){
+        rows.push('<tr><td style="color:var(--acc2)">'+f+'</td>'
+          +'<td style="color:var(--fg3)">'+(fieldMeta(f).label||'')+'</td>'
+          +'<td>'+e2.map(([v,cc])=>{
+              const vl=valLabel(t,f,v);
+              return '<span class="chip" style="margin:1px 2px;display:inline-block">'+v+(vl?'='+vl:'')+' <span style="color:var(--fg3)">×'+fmt(cc)+'</span></span>';
+            }).join('')+'</td></tr>');
+      }
+    }
+    if(rows.length){
+      h+='<div style="margin:11px 0 5px;font-size:11.5px;font-weight:600"><span style="color:'+tagMeta(t).color+'">■</span> '
+        +t+' <span style="color:var(--fg3);font-weight:400">'+tagMeta(t).label+' · '+fmt(sub.length)+' 条</span></div>';
+      h+='<table class="st">'+rows.join('')+'</table>';
+    }
+  }
+  h+='</div>';
+
+  $('statsBody').innerHTML=h;
+  $('statsBody').querySelectorAll('[data-addl]').forEach(tr=>{
+    tr.onclick=()=>{
+      S.hlAddl=tr.dataset.addl;
+      $('fAddl').value=tr.dataset.addl;
+      switchPane('timeline');applyFilter();tlFit();
+    };
+  });
+}
+
+/* =======================================================================
+   11. 语义字典编辑
+   ======================================================================= */
+function dictRender(){
+  let h='';
+  h+='<div class="note"><b>说明：</b>内置语义基于 openC910 / Triverse 预取器的常见命名做了推断标注，'
+    +'其中位域含义（如 <code>L2C_CMP.TYPE</code>、<code>REQS</code>）需要对照你的 RTL 编码确认。'
+    +'在这里改好的标签会保存在浏览器本地，下次打开自动生效，也可以导出成 JSON 在团队里共享。</div>';
+  h+='<div style="display:flex;gap:8px;margin-bottom:14px">'
+    +'<button class="btn" id="dExp">⬇ 导出字典 JSON</button>'
+    +'<button class="btn" id="dImp">⬆ 导入字典 JSON</button>'
+    +'<button class="btn" id="dRst">↺ 恢复内置默认</button>'
+    +'<input type="file" id="dFile" accept=".json" style="display:none">'
+    +'</div>';
+
+  h+='<div class="panel"><h4>事件类型标签</h4>';
+  for(const t of (S.tags.length?S.tags:Object.keys(DICT.tags))){
+    const m=tagMeta(t);
+    h+='<div class="kvedit"><code>'+t+'</code>'
+      +'<input class="inp dt-label" data-t="'+t+'" value="'+(m.label||'').replace(/"/g,'&quot;')+'">'
+      +'<input class="inp dt-color" type="color" data-t="'+t+'" value="'+m.color+'" style="padding:1px;height:26px"></div>';
+  }
+  h+='</div>';
+
+  h+='<div class="panel"><h4>字段标签</h4>';
+  const fl=S.allFields.length?S.allFields:Object.keys(DICT.fields);
+  for(const f of fl.slice().sort()){
+    const m=fieldMeta(f);
+    h+='<div class="kvedit"><code>'+f+'</code>'
+      +'<input class="inp df-label" data-f="'+f+'" value="'+(m.label||'').replace(/"/g,'&quot;')+'">'
+      +'<span style="font-size:10px;color:var(--fg3)">'+(m.hex?'hex ':'')+(m.bits?'位域 ':'')+(m.bin?'二进制 ':'')+(m.onehot?'one-hot':'')+'</span></div>';
+  }
+  h+='</div>';
+
+  h+='<div class="panel"><h4>取值标签（事件类型.字段 → 取值）</h4>'
+    +'<div class="hint">为具体取值加中文说明，会显示在提示气泡、详情面板和统计页里。格式：一行一条 <code>TAG.FIELD.VALUE = 说明</code></div>'
+    +'<textarea class="inp" id="dVals" style="min-height:170px;font-family:var(--mono)"></textarea>'
+    +'<button class="btn primary sm" id="dSaveVals" style="margin-top:8px">保存取值标签</button></div>';
+
+  $('dictBody').innerHTML=h;
+
+  const lines=[];
+  for(const key in DICT.values)for(const v in DICT.values[key])lines.push(key+'.'+v+' = '+DICT.values[key][v]);
+  $('dVals').value=lines.join('\n');
+
+  $('dictBody').querySelectorAll('.dt-label').forEach(el=>el.onchange=()=>{
+    DICT.tags[el.dataset.t]=Object.assign({},tagMeta(el.dataset.t),{label:el.value});saveDict();});
+  $('dictBody').querySelectorAll('.dt-color').forEach(el=>el.onchange=()=>{
+    DICT.tags[el.dataset.t]=Object.assign({},tagMeta(el.dataset.t),{color:el.value});saveDict();});
+  $('dictBody').querySelectorAll('.df-label').forEach(el=>el.onchange=()=>{
+    DICT.fields[el.dataset.f]=Object.assign({},fieldMeta(el.dataset.f),{label:el.value});saveDict();});
+  $('dSaveVals').onclick=()=>{
+    const nv={};
+    for(let ln of $('dVals').value.split('\n')){
+      ln=ln.trim();if(!ln)continue;
+      const m=ln.match(/^([\w]+)\.([\w]+)\.(\S+)\s*=\s*(.+)$/);
+      if(!m)continue;
+      const k=m[1]+'.'+m[2];
+      if(!nv[k])nv[k]={};
+      nv[k][m[3]]=m[4].trim();
+    }
+    DICT.values=nv;saveDict();msg('取值标签已保存');
+  };
+  $('dExp').onclick=()=>{
+    dl('trace-dict.json',JSON.stringify(DICT,null,2),'application/json');
+  };
+  $('dImp').onclick=()=>$('dFile').click();
+  $('dFile').onchange=e=>{
+    const f=e.target.files[0];if(!f)return;
+    f.text().then(t=>{try{const o=JSON.parse(t);
+      DICT.tags=Object.assign(DICT.tags,o.tags||{});
+      DICT.fields=Object.assign(DICT.fields,o.fields||{});
+      DICT.values=Object.assign(DICT.values,o.values||{});
+      saveDict();dictRender();redraw();msg('字典已导入');}catch(err){alert('JSON 解析失败：'+err.message);}});
+  };
+  $('dRst').onclick=()=>{
+    if(!confirm('恢复为内置默认字典？本地修改会丢失。'))return;
+    DICT=JSON.parse(JSON.stringify(BUILTIN));localStorage.removeItem(LS_KEY);dictRender();redraw();
+  };
+}
+function saveDict(){
+  try{localStorage.setItem(LS_KEY,JSON.stringify(DICT));}catch(e){}
+  refreshTags();redraw();
+}
+
+/* =======================================================================
+   12. 侧栏 / 交互
+   ======================================================================= */
+function refreshTags(){
+  const el=$('tagList');
+  const groups=[];const gm={};
+  for(const t of S.tags){const g=tagMeta(t).group;if(!gm[g]){gm[g]=[];groups.push(g);}gm[g].push(t);}
+  let h='';
+  for(const g of groups){
+    h+='<div style="font-size:9.5px;color:var(--fg3);letter-spacing:.6px;margin:7px 0 3px;font-weight:700">'+g.toUpperCase()+'</div>';
+    for(const t of gm[g]){
+      const c=(S.visByTag[t]||S.byTag[t]||[]).length;
+      h+='<label class="tagrow"><input type="checkbox" data-t="'+t+'"'+(S.tagOn[t]?' checked':'')+'>'
+        +'<span class="swatch" style="background:'+tagMeta(t).color+'"></span>'
+        +'<span class="nm" title="'+t+' · '+tagMeta(t).label+'">'+tagMeta(t).label+'</span>'
+        +'<span class="ct">'+fmt(c)+'</span></label>';
+    }
+  }
+  el.innerHTML=h;
+  el.querySelectorAll('input').forEach(cb=>cb.onchange=()=>{
+    S.tagOn[cb.dataset.t]=cb.checked;applyFilter();
+  });
+}
+/* =======================================================================
+   11.5 时间轴缩略图（minimap）
+   -----------------------------------------------------------------------
+   对所有以"周期为横坐标"的视图（时序泳道 / 流水线事务 / 访存分析-地址时间）
+   提供一个全局缩略图：全量可见事件的密度直方图 + 可拖拽/缩放的时间窗矩形。
+   拖拽矩形内部=平移；拖拽左右边缘=缩放筛选；矩形外点击=以该点为中心重定位；双击=全范围。
+   位置可切到主视图上方 / 下方 / 关闭，配置持久化（localStorage.tpv_mini）。
+   ======================================================================= */
+const Mini={enabled:false,pos:'bottom',cv:null,cx:null,W:0,H:0,dpr:1,
+  dens:null,densMx:1,densStamp:-1,drag:null,NB:1000};
+function miniInit(){
+  Mini.cv=$('miniCanvas');Mini.cx=Mini.cv.getContext('2d');
+  // v0.05.2 修复：localStorage 在 opaque-origin sandbox（预览无 allow-same-origin）
+  // 中访问会抛 SecurityError。此前此处未加保护，异常会冒泡中断初始化序列，
+  // 导致紧随其后的 bind() 永不执行、所有按钮无响应（v0.04 引入 minimap 后的回归）。
+  let pos=null;try{pos=localStorage.getItem('tpv_mini');}catch(e){}
+  Mini.pos=(pos==='top'||pos==='bottom'||pos==='off')?pos:'bottom';
+  Mini.enabled=Mini.pos!=='off';
+  Mini.cv.addEventListener('mousedown',miniDown);
+  window.addEventListener('mousemove',miniMove);
+  window.addEventListener('mouseup',miniUp);
+  Mini.cv.addEventListener('dblclick',miniDbl);
+  window.addEventListener('resize',()=>{if(Mini.enabled)miniResize();});
+  applyMiniIcon();
+}
+function miniController(){
+  if(S.pane==='timeline')return {active:true,
+    getWin:()=>({t0:TL.t0,t1:TL.t1}),setWin:(a,b)=>{TL.t0=a;TL.t1=b;tlDraw();}};
+  if(S.pane==='pipeline')return {active:true,
+    getWin:()=>({t0:PV.t0,t1:PV.t1}),setWin:(a,b)=>{PV.t0=a;PV.t1=b;pvDraw();}};
+  if(S.pane==='access'&&ACC.view==='atime'){
+    const t0=isFinite(ACC.t0)?ACC.t0:ACC._minC,t1=isFinite(ACC.t1)?ACC.t1:ACC._maxC;
+    return {active:true,getWin:()=>({t0:t0,t1:t1}),setWin:(a,b)=>{ACC.t0=a;ACC.t1=b;accRender();}};
+  }
+  return {active:false};
+}
+function miniMount(){
+  const wrap=$('miniWrap');if(!wrap)return;const c=miniController();
+  if(!Mini.enabled||!c.active){
+    // 仅隐藏，不从文档移除：否则下次 getElementById 取不到，后续切换会崩溃
+    wrap.style.display='none';
+  }else{
+    const pane=document.querySelector('.pane[data-p="'+S.pane+'"]');
+    const cw=pane.querySelector('.canvaswrap');
+    wrap.style.display='';wrap.className=Mini.pos==='top'?'top':'';
+    if(Mini.pos==='top')pane.insertBefore(wrap,cw);else pane.appendChild(wrap);
+    miniResize();
+  }
+  // canvaswrap 高度随 minimap 增删变化，需重算主画布尺寸并重绘；timeline 还需按 mini 状态切底栏
+  if(S.pane==='timeline'){tlResize();tlDraw();}
+  else if(S.pane==='pipeline'){pvResize();pvDraw();}
+  else if(S.pane==='access'&&ACC.view==='atime'){accResize();accRender();}
+}
+function miniResize(){
+  const wrap=$('miniWrap');if(!wrap||wrap.style.display==='none')return;
+  const r=wrap.getBoundingClientRect();if(r.width<2||r.height<2)return;
+  Mini.dpr=window.devicePixelRatio||1;
+  Mini.W=r.width;Mini.H=r.height;
+  Mini.cv.width=Math.round(Mini.W*Mini.dpr);Mini.cv.height=Math.round(Mini.H*Mini.dpr);
+  Mini.cx.setTransform(Mini.dpr,0,0,Mini.dpr,0,0);
+  miniDraw();
+}
+function miniDensity(){
+  if(Mini.densStamp===S.visIdx.length&&Mini.dens)return;
+  const N=Mini.NB,b=new Float32Array(N);let mx=1;
+  const min=S.minCyc,max=S.maxCyc,rg=Math.max(1,max-min);
+  for(const i of S.visIdx){const p=Math.min(N-1,Math.floor((S.raw[i].cyc-min)/rg*N));b[p]++;if(b[p]>mx)mx=b[p];}
+  Mini.dens=b;Mini.densMx=mx;Mini.densStamp=S.visIdx.length;
+}
+function miniDraw(){
+  if(!Mini.enabled)return;
+  const c=miniController();if(!c.active)return;
+  const cx=Mini.cx,W=Mini.W,H=Mini.H;if(!cx||W<2||H<2)return;
+  const css=getComputedStyle(document.documentElement);const C=palette(css);
+  cx.clearRect(0,0,W,H);cx.fillStyle=C.bg2;cx.fillRect(0,0,W,H);
+  cx.strokeStyle=C.line2;cx.lineWidth=1;cx.beginPath();cx.moveTo(0,.5);cx.lineTo(W,.5);cx.stroke();
+  miniDensity();
+  const min=S.minCyc,max=S.maxCyc,rg=Math.max(1,max-min);
+  const nb=Mini.dens.length,nh=H-4;
+  cx.fillStyle=C.acc;cx.globalAlpha=.5;
+  for(let p=0;p<nb;p++){if(!Mini.dens[p])continue;const hh=Math.max(1,Math.pow(Mini.dens[p]/Mini.densMx,0.45)*nh);const x=p/nb*W;cx.fillRect(x,H-hh,W/nb+1,hh);}
+  cx.globalAlpha=1;
+  const win=c.getWin();let a=win.t0,b=win.t1;
+  if(!(isFinite(a)&&isFinite(b)&&b>a)){a=min;b=max;}
+  let x0=(a-min)/rg*W,x1=(b-min)/rg*W;x0=Math.max(0,Math.min(W,x0));x1=Math.max(0,Math.min(W,x1));
+  if(x1-x0<2)x1=x0+2;
+  cx.fillStyle=C.navFill;cx.fillRect(x0,1,x1-x0,H-2);
+  cx.strokeStyle=C.acc;cx.lineWidth=1.5;cx.strokeRect(x0+.5,1.5,x1-x0-1,Math.max(2,H-3));
+  cx.fillStyle=C.fg;cx.globalAlpha=.85;cx.fillRect(x0-1,2,2,H-4);cx.fillRect(x1-1,2,2,H-4);
+  cx.globalAlpha=1;cx.fillStyle=C.fg3;cx.font='9px '+css.getPropertyValue('--mono');
+  cx.textAlign='left';cx.fillText(fmt(Math.round(a)),3,11);
+  cx.textAlign='right';cx.fillText(fmt(Math.round(b)),W-3,11);
+}
+function miniX2cyc(x){const min=S.minCyc,max=S.maxCyc,rg=Math.max(1,max-min);return min+x/Mini.W*rg;}
+function miniDown(e){
+  const c=miniController();if(!c.active)return;
+  e.preventDefault();
+  const r=Mini.cv.getBoundingClientRect();const x=e.clientX-r.left;
+  const W=Mini.W,min=S.minCyc,max=S.maxCyc,rg=Math.max(1,max-min);
+  const win=c.getWin();let a=win.t0,b=win.t1;if(!(isFinite(a)&&isFinite(b)&&b>a)){a=min;b=max;}
+  const x0=(a-min)/rg*W,x1=(b-min)/rg*W,EDGE=7;let mode;
+  if(x>=x0-EDGE&&x<=x0+EDGE)mode='l';
+  else if(x>=x1-EDGE&&x<=x1+EDGE)mode='r';
+  else if(x>x0&&x<x1)mode='pan';
+  else mode='new';
+  const xc=miniX2cyc(x);
+  Mini.drag={mode,xc,a,b};
+  if(mode==='new'){const w=b-a;let na=xc-w/2,nb=xc+w/2;if(na<min){na=min;nb=min+w;}if(nb>max){nb=max;na=max-w;}c.setWin(na,nb);Mini.drag.a=na;Mini.drag.b=nb;Mini.drag.xc=xc;}
+}
+function miniMove(e){
+  if(!Mini.drag)return;
+  const c=miniController();const r=Mini.cv.getBoundingClientRect();const x=e.clientX-r.left;
+  const min=S.minCyc,max=S.maxCyc,rg=Math.max(1,max-min);
+  const cc=miniX2cyc(x),d=cc-Mini.drag.xc;
+  let a=Mini.drag.a,b=Mini.drag.b;
+  if(Mini.drag.mode==='pan'||Mini.drag.mode==='new'){a=Mini.drag.a+d;b=Mini.drag.b+d;}
+  else if(Mini.drag.mode==='l')a=cc;
+  else if(Mini.drag.mode==='r')b=cc;
+  const lim=(max-min)*6+100;
+  if(b-a<0.5){const m=(a+b)/2;a=m-0.25;b=m+0.25;}
+  if(b-a>lim){const m=(a+b)/2;a=m-lim/2;b=m+lim/2;}
+  a=Math.max(min-lim*0.02,a);b=Math.min(max+lim*0.02,b);
+  c.setWin(a,b);
+}
+function miniUp(){Mini.drag=null;}
+function miniDbl(){const c=miniController();if(c.active)c.setWin(S.minCyc,S.maxCyc);}
+function miniCycle(){
+  Mini.pos=Mini.pos==='bottom'?'top':Mini.pos==='top'?'off':'bottom';
+  Mini.enabled=Mini.pos!=='off';
+  try{localStorage.setItem('tpv_mini',Mini.pos);}catch(e){}
+  applyMiniIcon();miniMount();
+}
+function applyMiniIcon(){
+  const b=$('btnMini');if(!b)return;
+  const map={off:['🗺','时间轴缩略图：关闭（点击切换 上/下/关）'],top:['🗺↑','缩略图：主视图上方（点击切换）'],bottom:['🗺↓','缩略图：主视图下方（点击切换）']};
+  const m=map[Mini.pos]||map.off;b.textContent=m[0];b.title=m[1];
+}
+
+function switchPane(p){
+  S.pane=p;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.p===p));
+  document.querySelectorAll('.pane').forEach(t=>t.classList.toggle('on',t.dataset.p===p));
+  hideTip();
+  requestAnimationFrame(()=>{
+    if(p==='timeline'){tlResize();tlDraw();}
+    else if(p==='pipeline'){pvResize();pvBuild();pvDraw();}
+    else if(p==='table')tbRender();
+    else if(p==='stats')statsRender();
+    else if(p==='access'){accResize();accRender();}
+    else if(p==='dict')dictRender();
+    miniMount();
+  });
+}
+function redraw(){
+  if(S.pane==='timeline')tlDraw();
+  else if(S.pane==='pipeline'){pvBuild();pvDraw();}
+  else if(S.pane==='table')tbRender();
+  else if(S.pane==='stats')statsRender();
+  else if(S.pane==='access')accRender();
+}
+
+/* =======================================================================
+   12. 访存分析（针对包含 ADDL 的事件）
+   -----------------------------------------------------------------------
+   四个子视图：地址-时间 / 地址热点 / 访问步幅 / 重访间隔。
+   数据全部来自 S.visIdx 中含 ADDL 字段的事件，随侧栏过滤实时联动。
+   ======================================================================= */
+const ACC={cv:null,cx:null,W:0,H:0,dpr:1,
+  view:'atime',axis:'num',k:40,
+  t0:NaN,t1:NaN,_minC:0,_maxC:1,drag:null,hover:null,_view:undefined,_cs:-1,
+  cache:null,stamp:-1,points:[],grid:null,padL:62,padR:14,padT:30,padB:30};
+
+function accInit(){
+  ACC.cv=$('accCanvas');ACC.cx=ACC.cv.getContext('2d');
+  new ResizeObserver(()=>{accResize();accRender();}).observe($('accWrap'));
+  ACC.cv.addEventListener('wheel',e=>{
+    if(ACC.view!=='atime')return;
+    e.preventDefault();
+    const r=ACC.cv.getBoundingClientRect();
+    const x=e.clientX-r.left;
+    const w=ACC.W-ACC.padL-ACC.padR;if(w<=0)return;
+    const c=ACC.t0+(x-ACC.padL)/w*(ACC.t1-ACC.t0);
+    const f=e.deltaY>0?1.18:1/1.18;
+    ACC.t0=c-(c-ACC.t0)*f;ACC.t1=c+(ACC.t1-c)*f;accRender();
+  },{passive:false});
+  ACC.cv.addEventListener('mousedown',e=>{
+    if(ACC.view!=='atime')return;
+    const r=ACC.cv.getBoundingClientRect();
+    ACC.drag={x:e.clientX-r.left,t0:ACC.t0,t1:ACC.t1};
+  });
+  window.addEventListener('mousemove',e=>{
+    if(ACC.drag){
+      const r=ACC.cv.getBoundingClientRect();
+      const w=ACC.W-ACC.padL-ACC.padR;
+      const d=(ACC.drag.x-(e.clientX-r.left))/w*(ACC.drag.t1-ACC.drag.t0);
+      ACC.t0=ACC.drag.t0+d;ACC.t1=ACC.drag.t1+d;accRender();return;
+    }
+    if(Mini.drag)return;
+    if(S.pane!=='access')return;
+    const r=ACC.cv.getBoundingClientRect();
+    const x=e.clientX-r.left,y=e.clientY-r.top;
+    const p=accPick(x,y);
+    if(p){
+      if(ACC.view==='atime'){
+        if(ACC.hover!==p){ACC.hover=p;accRender();}
+        if(ACC.points[p])showTipEvent(ACC.points[p].i,e.clientX,e.clientY);
+      }else{
+        if(ACC.hover!==p.key){ACC.hover=p.key;accRender();}
+        if(p.i!==undefined&&p.i>=0)showTipEvent(p.i,e.clientX,e.clientY);
+        else if(p.tip)showTip(p.tip,e.clientX,e.clientY);
+      }
+    }else{
+      if(ACC.hover!==null){ACC.hover=null;accRender();}
+      hideTip();
+    }
+  });
+  window.addEventListener('mouseup',()=>{ACC.drag=null;});
+  ACC.cv.addEventListener('dblclick',()=>{if(ACC.view==='atime'){ACC.t0=ACC._minC;ACC.t1=ACC._maxC;accRender();}});
+  ACC.cv.addEventListener('click',e=>{
+    const r=ACC.cv.getBoundingClientRect();
+    const x=e.clientX-r.left,y=e.clientY-r.top;
+    if(ACC.view==='atime'){
+      const hit=accPick(x,y);
+      if(hit>=0&&ACC.points[hit])selectEvent(ACC.points[hit].i,false);
+    }else{
+      const p=accPick(x,y);
+      if(p&&p.i!==undefined&&p.i>=0)selectEvent(p.i,false);
+    }
+  });
+}
+function accResize(){
+  const w=$('accWrap');if(!w)return;
+  const r=w.getBoundingClientRect();
+  ACC.dpr=window.devicePixelRatio||1;
+  ACC.W=Math.max(10,r.width);ACC.H=Math.max(10,r.height);
+  ACC.cv.width=ACC.W*ACC.dpr;ACC.cv.height=ACC.H*ACC.dpr;
+  ACC.cx.setTransform(ACC.dpr,0,0,ACC.dpr,0,0);
+}
+function accMono(){return getComputedStyle(document.documentElement).getPropertyValue('--mono');}
+
+/* 从可见事件中筛出含 ADDL 的事件，并按缓存行分组、计算步幅/重访间隔。
+   结果按 S.visIdx.length 缓存，避免每次重绘重复构建。 */
+function accBuild(){
+  if(ACC.stamp===S.visIdx.length&&ACC.cache)return ACC.cache;
+  const raw=S.raw, idx=S.visIdx;
+  const ev=[];
+  for(const i of idx){
+    const a=raw[i].d.ADDL;
+    if(a===undefined)continue;
+    const num=parseInt(a,16);
+    ev.push({i,addlStr:a,addl:isNaN(num)?0:num,cyc:raw[i].cyc,tag:raw[i].tag});
+  }
+  const byAddl=new Map();
+  let minA=Infinity,maxA=-Infinity;
+  for(const e of ev){
+    let arr=byAddl.get(e.addlStr);if(!arr){arr=[];byAddl.set(e.addlStr,arr);}arr.push(e);
+    if(e.addl<minA)minA=e.addl;if(e.addl>maxA)maxA=e.addl;
+  }
+  let strideTotal=0,strideZero=0,stridePos=0,strideNeg=0,reuseTotal=0;
+  const strideFreq=new Map(),reuseFreq=new Map();
+  // 重访间隔分桶：首桶含 dc=0（同一周期内对同一行的多次访问）
+  const reuseBuckets=[[0,3],[3,10],[10,30],[30,100],[100,300],[300,1000],[1000,3000],[3000,10000],[10000,100000],[100000,Infinity]];
+  const rb=new Array(reuseBuckets.length).fill(0);
+  // 重访间隔：同一缓存行内相邻两次访问的周期间隔
+  for(const arr of byAddl.values()){
+    arr.sort((a,b)=>a.cyc-b.cyc);
+    for(let m=1;m<arr.length;m++){
+      const dc=arr[m].cyc-arr[m-1].cyc;
+      reuseTotal++;
+      reuseFreq.set(dc,(reuseFreq.get(dc)||0)+1);
+      for(let b=0;b<reuseBuckets.length;b++){const [lo,hi]=reuseBuckets[b];if(dc>=lo&&dc<hi){rb[b]+=1;break;}}
+    }
+  }
+  // 步幅：全局访问流（按时间排序）中相邻两次访问的地址差，反映顺序/随机访问模式。
+  // 注意：不是同一缓存行内部（行内地址恒等，差必为 0），而是跨时间的访问地址变化。
+  const stream=ev.slice().sort((a,b)=>a.cyc-b.cyc);
+  for(let m=1;m<stream.length;m++){
+    const d=stream[m].addl-stream[m-1].addl;
+    strideTotal++;
+    if(d===0)strideZero++;else if(d>0)stridePos++;else strideNeg++;
+    strideFreq.set(d,(strideFreq.get(d)||0)+1);
+  }
+  const strideTop=[...strideFreq.entries()].map(([d,c])=>({d,c})).sort((a,b)=>b.c-a.c).slice(0,30);
+  ACC.cache={ev,byAddl,minA,maxA,nAddl:byAddl.size,nEv:ev.length,
+    strideTotal,strideZero,stridePos,strideNeg,strideTop,
+    reuseTotal,reuseBuckets,reuseBucketsCnt:rb};
+  ACC.stamp=S.visIdx.length;
+  return ACC.cache;
+}
+
+function accRender(){
+  if(!ACC.cx)return;
+  const css=getComputedStyle(document.documentElement);
+  const C=palette(css);
+  accClear(C);
+  if(ACC._view!==ACC.view){ACC.hover=null;ACC._view=ACC.view;ACC.t0=NaN;ACC.t1=NaN;}
+  const cs=S.visIdx.length;
+  if(ACC._cs!==cs){ACC.hover=null;ACC._cs=cs;ACC.t0=NaN;ACC.t1=NaN;}
+  if(!S.raw.length){accNote('请先加载 Trace 文件');return;}
+  const c=accBuild();
+  $('accEv').textContent=fmt(c.nEv);
+  $('accLines').textContent=fmt(c.nAddl);
+  $('accAxisWrap').style.display=ACC.view==='atime'?'':'none';
+  $('accKWrap').style.display=ACC.view==='hot'?'':'none';
+  if(ACC.view==='atime')accDrawAtime(C,c);
+  else if(ACC.view==='hot')accDrawHot(C,c);
+  else if(ACC.view==='stride')accDrawStride(C,c);
+  else if(ACC.view==='reuse')accDrawReuse(C,c);
+  if(Mini.enabled&&ACC.view==='atime')miniDraw();
+}
+function accClear(C){ACC.cx.fillStyle=C?C.bg:'#0e1116';ACC.cx.fillRect(0,0,ACC.W,ACC.H);}
+function accNote(msg){
+  const cx=ACC.cx;cx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--fg3').trim();
+  cx.font='13px sans-serif';cx.textAlign='center';cx.fillText(msg,ACC.W/2,ACC.H/2);
+}
+function accPick(x,y){
+  if(ACC.view==='atime'){
+    if(!ACC.grid)return -1;
+    const cell=9,gx=Math.floor(x/cell),gy=Math.floor(y/cell);let best=-1,bd=1e9;
+    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+      const arr=ACC.grid.get((gx+dx)+','+(gy+dy));if(!arr)continue;
+      for(const idx of arr){if(idx<0||idx>=ACC.points.length)continue;const p=ACC.points[idx];const d=(p.x-x)*(p.x-x)+(p.y-y)*(p.y-y);if(d<bd){bd=d;best=idx;}}
+    }
+    const hitR=6;
+    if(best>=0&&bd<=hitR*hitR)return best;
+    return -1;
+  }
+  for(const p of ACC.points){
+    if(p.x!==undefined&&p.w!==undefined&&x>=p.x&&x<=p.x+p.w&&y>=p.y&&y<=p.y+p.h)return p;
+  }
+  return null;
+}
+
+/* ---- 子视图 1：地址-时间散点 ---- */
+function accDrawAtime(C,c){
+  const cx=ACC.cx;
+  const padL=ACC.padL,padR=ACC.padR,padT=ACC.padT,padB=ACC.padB;
+  const plotX=padL,plotW=ACC.W-padL-padR,plotY=padT,plotH=ACC.H-padT-padB;
+  if(plotW<20||plotH<20)return;
+  const mono=accMono();
+  let t0=ACC.t0,t1=ACC.t1;
+  if(!(isFinite(t0)&&isFinite(t1)&&t1>t0)){
+    let mn=Infinity,mx=-Infinity;for(const e of c.ev){if(e.cyc<mn)mn=e.cyc;if(e.cyc>mx)mx=e.cyc;}
+    ACC._minC=isFinite(mn)?mn:S.minCyc;ACC._maxC=isFinite(mx)?mx:S.maxCyc;
+    ACC.t0=ACC._minC;ACC.t1=ACC._maxC;t0=ACC.t0;t1=ACC.t1;
+  }
+  const minA=c.minA,maxA=c.maxA,spanT=(t1-t0)||1;
+  const X=cyc=>plotX+(cyc-t0)/spanT*plotW;
+  const addrs=[...c.byAddl.keys()].sort((a,b)=>(parseInt(a,16)||0)-(parseInt(b,16)||0));
+  const rowOf=new Map();addrs.forEach((a,k)=>rowOf.set(a,k));
+  const nA=addrs.length,rowH=nA>0?plotH/nA:plotH;
+  const Yaddl=a=>maxA===minA?plotY+plotH/2:plotY+(a-minA)/(maxA-minA)*plotH;
+  const Yrow=k=>plotY+(k+0.5)*rowH;
+  // y 网格（数值地址模式）
+  if(ACC.axis!=='row'){
+    cx.strokeStyle=C.line;cx.globalAlpha=.5;cx.beginPath();
+    for(let q=0;q<=4;q++){const y=plotY+plotH*q/4;cx.moveTo(plotX,y+.5);cx.lineTo(plotX+plotW,y+.5);}
+    cx.stroke();cx.globalAlpha=1;
+  }
+  // x 轴刻度
+  let step=Math.pow(10,Math.floor(Math.log10(spanT/plotW*90)));
+  for(const m of [1,2,5,10]){if(step*m*plotW/spanT>=90){step=step*m;break;}}
+  cx.fillStyle=C.fg3;cx.font='10px '+mono;cx.textAlign='center';
+  for(let cc=Math.ceil(t0/step)*step;cc<t1;cc+=step){
+    const x=X(cc);
+    cx.strokeStyle=C.line;cx.globalAlpha=.4;cx.beginPath();cx.moveTo(x+.5,plotY);cx.lineTo(x+.5,plotY+plotH);cx.stroke();cx.globalAlpha=1;
+    cx.fillText(fmt(Math.round(cc)),x,plotY+plotH+14);
+  }
+  // y 轴刻度
+  cx.textAlign='right';cx.fillStyle=C.fg3;
+  if(ACC.axis!=='row'){
+    for(let q=0;q<=4;q++){const a=maxA-(maxA-minA)*q/4;cx.fillText('0x'+(a>>>0).toString(16),plotX-6,plotY+plotH*q/4+3);}
+  }else{
+    const stepR=Math.max(1,Math.floor(nA/14));
+    for(let k=0;k<nA;k+=stepR)cx.fillText('0x'+addrs[k],plotX-6,plotY+(k+0.5)*rowH+3);
+  }
+  // 数据点
+  ACC.points=[];const grid=new Map();const cell=9;
+  for(const e of c.ev){
+    const x=X(e.cyc);if(x<plotX-3||x>plotX+plotW+3)continue;
+    const y=ACC.axis==='row'?Yrow(rowOf.get(e.addlStr)):Yaddl(e.addl);
+    if(y<plotY-3||y>plotY+plotH+3)continue;
+    cx.fillStyle=tagMeta(e.tag).color;
+    cx.globalAlpha=ACC.axis==='row'?0.82:0.7;
+    cx.fillRect(x-1.7,y-1.7,3.4,3.4);
+    const idx=ACC.points.length;ACC.points.push({x,y,i:e.i});
+    const gk=Math.floor(x/cell)+','+Math.floor(y/cell);
+    let arr=grid.get(gk);if(!arr){arr=[];grid.set(gk,arr);}arr.push(idx);
+  }
+  ACC.grid=grid;cx.globalAlpha=1;
+  if(ACC.hover!==null&&ACC.hover>=0&&ACC.hover<ACC.points.length){
+    const p=ACC.points[ACC.hover];
+    cx.strokeStyle=C.markHi;cx.lineWidth=1.6;cx.beginPath();cx.arc(p.x,p.y,(ACC.axis==='row'?3:4),0,7);cx.stroke();
+  }
+  /* --- 关联高亮（同PC / 同ADDL） --- */
+  if(S.relSet){
+    const spIdx=ACC.points.findIndex(p=>p.i===S.sel);
+    if(spIdx>=0){
+      const sp=ACC.points[spIdx];
+      cx.save();
+      cx.beginPath();cx.rect(plotX,plotY,plotW,plotH);cx.clip();
+      cx.lineWidth=1.3;cx.strokeStyle=C.rel;cx.globalAlpha=.8;cx.setLineDash([4,3]);
+      let n=0;
+      for(const pp of ACC.points){
+        if(n++>=REL_MAX)break;
+        if(!S.relSet.has(pp.i))continue;
+        cx.beginPath();cx.moveTo(sp.x,sp.y);cx.lineTo(pp.x,pp.y);cx.stroke();
+      }
+      cx.setLineDash([]);cx.globalAlpha=1;cx.fillStyle=C.rel;n=0;
+      for(const pp of ACC.points){
+        if(n++>=REL_MAX)break;
+        if(!S.relSet.has(pp.i))continue;
+        cx.beginPath();cx.arc(pp.x,pp.y,4,0,7);cx.fill();
+        cx.lineWidth=1.4;cx.strokeStyle=C.bg;cx.stroke();
+      }
+      cx.restore();
+    }
+  }
+  /* 选中点强调 */
+  {
+    const spIdx=ACC.points.findIndex(p=>p.i===S.sel);
+    if(spIdx>=0){const sp=ACC.points[spIdx];
+      cx.strokeStyle=C.markHi;cx.lineWidth=1.8;cx.beginPath();cx.arc(sp.x,sp.y,5.5,0,7);cx.stroke();}
+  }
+  // 轴标题
+  cx.fillStyle=C.fg2;cx.font='700 10px '+mono;cx.textAlign='left';
+  cx.fillText('时间（周期）→',plotX,18);
+  cx.save();cx.translate(14,plotY+plotH/2);cx.rotate(-Math.PI/2);cx.textAlign='center';
+  cx.fillText(ACC.axis==='row'?'缓存行（按地址排序，每行一个）':'缓存行地址（ADDL）',0,0);cx.restore();
+  $('accHint').textContent=ACC.axis==='row'
+    ? '每行为一个缓存行，点在行内水平位置即访问时刻 · 单击定位 · 双击复位'
+    : '每个点为一次含 ADDL 的事件，纵轴为缓存行地址 · 滚轮缩放 · 拖拽平移 · 单击定位 · 双击复位';
+}
+
+/* ---- 子视图 2：地址热点 Top-N ---- */
+function accDrawHot(C,c){
+  const cx=ACC.cx;
+  const k=Math.max(1,Math.min(300,ACC.k|0||40));
+  const padL=158,padR=16,padT=24,padB=10;
+  const items=[...c.byAddl.entries()].map(([a,arr])=>{
+    let mn=Infinity,mx=-Infinity;const types=new Set();
+    for(const e of arr){if(e.cyc<mn)mn=e.cyc;if(e.cyc>mx)mx=e.cyc;types.add(e.tag);}
+    return {a,n:arr.length,mn,mx,types:types.size,main:arr[0].tag,first:arr[0].i};
+  }).sort((x,y)=>y.n-x.n).slice(0,k);
+  const plotX=padL,plotW=ACC.W-padL-padR,plotY=padT,plotH=ACC.H-padT-padB;
+  if(plotH<10){accNote('窗口过小');return;}
+  const rowH=Math.max(16,plotH/items.length),mx=items.length?items[0].n:1;
+  const mono=accMono();
+  cx.fillStyle=C.fg3;cx.font='10px '+mono;cx.textAlign='left';
+  cx.fillText('缓存行',plotX-150,plotY-8);cx.fillText('访问次数',plotX+4,plotY-8);
+  ACC.points=[];
+  for(let m=0;m<items.length;m++){
+    const it=items[m];const y=plotY+m*rowH;const bh=Math.max(6,rowH-6);
+    cx.textAlign='right';cx.fillStyle=C.fg2;cx.font='11px '+mono;
+    cx.fillText('0x'+it.a,plotX-8,y+rowH/2+3.5);
+    const w=Math.max(2,it.n/mx*plotW);
+    cx.fillStyle=tagMeta(it.main).color;cx.globalAlpha=.82;cx.fillRect(plotX,y+(rowH-bh)/2,w,bh);cx.globalAlpha=1;
+    if(ACC.hover===it.a){cx.strokeStyle=C.markHi;cx.lineWidth=1.4;cx.strokeRect(plotX+.5,y+.5,plotW-1,rowH-1);}
+    cx.fillStyle=C.fg;cx.textAlign='left';cx.font='10.5px '+mono;
+    cx.fillText(fmt(it.n)+'  ('+it.types+' 类 · '+fmt(it.mn)+'→'+fmt(it.mx)+'c)',plotX+w+6,y+rowH/2+3.5);
+    ACC.points.push({x:plotX,y,w:plotW,h:rowH,i:it.first,key:it.a,
+      tip:'<div class="t">缓存行 0x'+it.a+'</div>'
+        +'<div class="kv">访问次数 <b>'+fmt(it.n)+'</b></div>'
+        +'<div class="kv">涉及事件类型 <b>'+it.types+'</b> 类</div>'
+        +'<div class="kv">首次/末次周期 <b>'+fmt(it.mn)+'</b> → <b>'+fmt(it.mx)+'</b></div>'
+        +'<div class="kv" style="color:var(--fg3)">单击定位到该缓存行的首个事件</div>'});
+  }
+  $('accHint').textContent='按访问次数排序的 Top-N 缓存行 · 单击任一行定位到其首个事件';
+}
+
+/* ---- 子视图 3：访问步幅分布 ---- */
+function accDrawStride(C,c){
+  const cx=ACC.cx;
+  if(!c.strideTotal){accNote('该过滤条件下无相邻同地址访问（无法计算步幅）');return;}
+  const padL=150,padR=16,padT=80,padB=12;
+  const plotX=padL,plotW=ACC.W-padL-padR,plotY=padT,plotH=ACC.H-padT-padB;
+  const mono=accMono();
+  const zeroPct=(c.strideZero/c.strideTotal*100).toFixed(1);
+  const posPct=(c.stridePos/c.strideTotal*100).toFixed(1);
+  const negPct=(c.strideNeg/c.strideTotal*100).toFixed(1);
+  cx.textAlign='left';cx.font='11.5px '+mono;cx.fillStyle=C.fg2;
+  cx.fillText('相邻同地址访问步幅统计：共 '+fmt(c.strideTotal)+' 对',12,20);
+  cx.fillStyle=C.fg;
+  cx.fillText('Δ=0（重复同地址） '+zeroPct+'%',12,40);
+  cx.fillText('Δ>0（地址递增） '+posPct+'%',300,40);
+  cx.fillText('Δ<0（地址递减） '+negPct+'%',560,40);
+  cx.fillStyle=C.fg3;cx.font='10.5px '+mono;
+  cx.fillText('结论：Δ=0 占比高 → 集中重访热点；Δ 集中于某固定正值 → 顺序/步幅访问（利于步幅预取）',12,60);
+  const top=c.strideTop.slice(0,18),mx=top.length?top[0].c:1,rowH=Math.max(16,plotH/top.length);
+  ACC.points=[];
+  for(let m=0;m<top.length;m++){
+    const d=top[m].d,cc=top[m].c,absD=Math.abs(d),stepLines=absD/64;
+    const label=(d===0?'Δ=0 同地址':(d>0?'+':'')+stepLines+' 行 / '+absD+'B');
+    const y=plotY+m*rowH;const bh=Math.max(5,rowH-5);
+    cx.textAlign='right';cx.fillStyle=C.fg2;cx.font='10.5px '+mono;
+    cx.fillText(label,plotX-8,y+rowH/2+3.5);
+    const w=Math.max(2,cc/mx*plotW);
+    cx.fillStyle=d===0?'#ff8c42':(d>0?'#4ea1ff':'#b478ff');cx.globalAlpha=.82;
+    cx.fillRect(plotX,y+(rowH-bh)/2,w,bh);cx.globalAlpha=1;
+    if(ACC.hover==='s'+d){cx.strokeStyle=C.markHi;cx.lineWidth=1.4;cx.strokeRect(plotX+.5,y+.5,plotW-1,rowH-1);}
+    cx.fillStyle=C.fg;cx.textAlign='left';cx.font='10.5px '+mono;
+    cx.fillText(fmt(cc)+' ('+(cc/c.strideTotal*100).toFixed(1)+'%)',plotX+w+6,y+rowH/2+3.5);
+    ACC.points.push({x:plotX,y,w:plotW,h:rowH,key:'s'+d,
+      tip:'<div class="t">步幅 '+label+'</div><div class="kv">出现次数 <b>'+fmt(cc)+'</b></div><div class="kv">占比 <b>'+(cc/c.strideTotal*100).toFixed(1)+'%</b></div>'});
+  }
+  $('accHint').textContent='同一缓存行内相邻两次访问的地址步幅（缓存行 64B 对齐，步数 = 字节差/64）';
+}
+
+/* ---- 子视图 4：重访间隔分布 ---- */
+function accDrawReuse(C,c){
+  const cx=ACC.cx;
+  if(!c.reuseTotal){accNote('该过滤条件下无相邻同地址访问（无法计算重访间隔）');return;}
+  const rb=c.reuseBucketsCnt,bnd=c.reuseBuckets;
+  const padL=150,padR=16,padT=94,padB=12;
+  const plotX=padL,plotW=ACC.W-padL-padR,plotY=padT,plotH=ACC.H-padT-padB;
+  const mono=accMono();
+  let lt10=0,lt100=0,lt1000=0;
+  for(let b=0;b<bnd.length;b++){const hi=bnd[b][1];if(hi<=10)lt10+=rb[b];else if(hi<=100)lt100+=rb[b];else if(hi<=1000)lt1000+=rb[b];}
+  cx.textAlign='left';cx.font='11.5px '+mono;cx.fillStyle=C.fg2;
+  cx.fillText('同一地址相邻访问的周期间隔（重访间隔）统计：共 '+fmt(c.reuseTotal)+' 对',12,20);
+  cx.fillStyle=C.fg;
+  cx.fillText('<10c（强局部性） '+(lt10/c.reuseTotal*100).toFixed(1)+'%',12,40);
+  cx.fillText('<100c '+(lt100/c.reuseTotal*100).toFixed(1)+'%',230,40);
+  cx.fillText('<1000c '+(lt1000/c.reuseTotal*100).toFixed(1)+'%',420,40);
+  cx.fillStyle=C.fg3;cx.font='10.5px '+mono;
+  cx.fillText('短间隔占比高 → 时间局部性好、易被 L1/L2 命中；长尾 → 未命中或缓存行已被替换',12,60);
+  const mx=Math.max(...rb,1),rowH=Math.max(16,plotH/rb.length);
+  ACC.points=[];
+  for(let b=0;b<rb.length;b++){
+    const cc=rb[b];const [lo,hi]=bnd[b];
+    const label=hi===Infinity?('≥'+fmt(lo)+'c'):(fmt(lo)+'–'+fmt(hi)+'c');
+    const y=plotY+b*rowH;const bh=Math.max(5,rowH-5);
+    cx.textAlign='right';cx.fillStyle=C.fg2;cx.font='10.5px '+mono;
+    cx.fillText(label,plotX-8,y+rowH/2+3.5);
+    const w=Math.max(2,cc/mx*plotW);
+    cx.fillStyle='#52d38a';cx.globalAlpha=.82;cx.fillRect(plotX,y+(rowH-bh)/2,w,bh);cx.globalAlpha=1;
+    if(ACC.hover==='r'+b){cx.strokeStyle=C.markHi;cx.lineWidth=1.4;cx.strokeRect(plotX+.5,y+.5,plotW-1,rowH-1);}
+    cx.fillStyle=C.fg;cx.textAlign='left';cx.font='10.5px '+mono;
+    cx.fillText(fmt(cc)+' ('+(cc/c.reuseTotal*100).toFixed(1)+'%)',plotX+w+6,y+rowH/2+3.5);
+    ACC.points.push({x:plotX,y,w:plotW,h:rowH,key:'r'+b,
+      tip:'<div class="t">重访间隔 '+label+'</div><div class="kv">出现次数 <b>'+fmt(cc)+'</b></div><div class="kv">占比 <b>'+(cc/c.reuseTotal*100).toFixed(1)+'%</b></div>'});
+  }
+  $('accHint').textContent='同一缓存行内相邻两次访问的周期间隔分布（对数分桶），反映时间局部性';
+}
+
+let msgT=null;
+function msg(s){$('sMsg').textContent=s;clearTimeout(msgT);msgT=setTimeout(()=>$('sMsg').textContent='',3200);}
+function dl(name,content,type){
+  const b=new Blob([content],{type:type||'text/plain;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(b);a.download=name;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+}
+
+/* =======================================================================
+   13. 文件加载
+   ======================================================================= */
+function loadFile(f){
+  if(!f){msg('未选择文件');return;}
+  S.fileName=f.name;
+  $('sFile').textContent=f.name+' ('+(f.size/1048576).toFixed(2)+' MB)';
+  $('prog').classList.add('on');
+  $('ptext').textContent='读取文件…';
+  $('pbarI').style.width='2%';
+  try{
+    const rd=new FileReader();
+    rd.onload=()=>{
+      setTimeout(()=>parseText(rd.result,onLoaded),10);
+    };
+    rd.onerror=()=>{$('prog').classList.remove('on');$('ptext').textContent='读取失败：'+(rd.error||'unknown');msg('文件读取失败');};
+    rd.readAsText(f);
+  }catch(err){
+    $('prog').classList.remove('on');
+    msg('加载失败：'+(err&&err.message||err));
+  }
+}
+// 从已获取的文本直接加载（粘贴 / 脚本来源），无需原生文件对话框
+function loadText(txt){
+  if(!txt||!txt.trim()){msg('没有可解析的文本');return;}
+  S.fileName='粘贴内容';
+  $('sFile').textContent='粘贴内容 ('+(txt.length/1024).toFixed(1)+' KB)';
+  $('prog').classList.add('on');
+  $('ptext').textContent='解析文本…';
+  $('pbarI').style.width='5%';
+  try{
+    setTimeout(()=>parseText(txt,onLoaded),10);
+  }catch(err){
+    $('prog').classList.remove('on');
+    msg('解析失败：'+(err&&err.message||err));
+  }
+}
+function onLoaded(bad){
+  $('sTotal').textContent=fmt(S.raw.length);
+  $('sTags').textContent=S.tags.length;
+  $('sSpan').textContent=fmt(S.maxCyc-S.minCyc);
+  $('loader').classList.add('hide');
+  refreshTags();
+  applyFilter();
+  tlResize();tlFit();
+  msg('已加载 '+fmt(S.raw.length)+' 条事件'+(bad?('，跳过 '+bad+' 行无法解析'):''));
+}
+
+/* =======================================================================
+   14. 导出
+   ======================================================================= */
+function exportCsv(){
+  if(!S.visIdx.length){alert('当前没有可导出的事件');return;}
+  const fs=S.allFields;
+  const head=['cycle','time','tag','line'].concat(fs);
+  const rows=[head.join(',')];
+  for(const i of S.visIdx){
+    const e=S.raw[i];
+    const r=[e.cyc,e.t,e.tag,e.ln];
+    for(const f of fs)r.push(e.d[f]!==undefined?e.d[f]:'');
+    rows.push(r.join(','));
+  }
+  dl((S.fileName||'trace').replace(/\.\w+$/,'')+'-filtered.csv',rows.join('\n'),'text/csv;charset=utf-8');
+  msg('已导出 '+fmt(S.visIdx.length)+' 条事件');
+}
+function exportPng(){
+  const cv=S.pane==='pipeline'?PV.cv:TL.cv;
+  if(!cv){alert('当前视图不支持导出图片');return;}
+  cv.toBlob(b=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(b);
+    a.download=(S.fileName||'trace').replace(/\.\w+$/,'')+'-'+S.pane+'.png';
+    a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  });
+  msg('已导出视图截图');
+}
+
+/* =======================================================================
+   15. 事件绑定
+   ======================================================================= */
+function bind(){
+  $('btnPick').onclick=()=>$('filePick').click();
+  $('btnOpen').onclick=()=>$('filePick').click();
+  $('btnFolder').onclick=()=>$('folderPick').click();
+  // 修复：加载页（#loader）默认全屏覆盖整个主舞台，未加载 trace 前会拦截所有
+  // 视图内按钮与画布的点击，表现为"界面按钮都没反应"。改为点击遮罩任意位置即触发文件选择。
+  $('loader').addEventListener('click',e=>{
+    if(e.target.id!=='btnPick'&&e.target.id!=='filePick'&&e.target.id!=='btnFolder'&&e.target.id!=='folderPick')$('filePick').click();
+  });
+  $('filePick').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);};
+  $('folderPick').onchange=()=>{
+    const files=[...(($('folderPick').files)||[])];
+    if(!files.length){msg('未选择文件夹');return;}
+    // 从文件夹中挑选 trace 文件（按扩展名匹配），否则取首个文件
+    const trace=files.find(f=>/\.(txt|log|trace|csv)$/i.test(f.name))||files[0];
+    loadFile(trace);
+  };
+  // 粘贴加载（沙箱/预览环境下文件对话框被拦截时的可靠回退）
+  const pa=$('pasteArea');
+  pa.addEventListener('paste',()=>{ setTimeout(()=>{const t=pa.value.trim();if(t)loadText(t);},0); });
+  $('btnPasteLoad').onclick=()=>{const t=pa.value.trim();if(t)loadText(t);else msg('请先粘贴 Trace 文本');};
+  $('btnPasteClear').onclick=()=>{pa.value='';msg('已清空');};
+  const dz=$('drop');
+  ['dragenter','dragover'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add('over');}));
+  ['dragleave','drop'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove('over');}));
+  dz.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)loadFile(f);});
+  document.addEventListener('dragover',e=>e.preventDefault());
+  document.addEventListener('drop',e=>{
+    e.preventDefault();
+    if($('loader').classList.contains('hide')){
+      const f=e.dataTransfer.files[0];
+      if(f){$('loader').classList.remove('hide');loadFile(f);}
+    }
+  });
+
+  $('tabs').onclick=e=>{const t=e.target.closest('.tab');if(t)switchPane(t.dataset.p);};
+  $('btnSide').onclick=()=>{$('side').classList.toggle('collapsed');
+    requestAnimationFrame(()=>{tlResize();pvResize();redraw();});};
+  const THEMES=['dark','light','sepia'];
+  const THEME_ICON={dark:'◐',light:'◑',sepia:'▣'};
+  const THEME_NAME={dark:'深色',light:'浅色',sepia:'米色'};
+  function applyThemeIcon(){
+    const cur=document.documentElement.getAttribute('data-theme')||'dark';
+    $('btnTheme').title='主题：'+THEME_NAME[cur]+'（点击切换）';
+    $('btnTheme').textContent=THEME_ICON[cur];
+  }
+  $('btnTheme').onclick=()=>{
+    const cur=document.documentElement.getAttribute('data-theme')||'dark';
+    const nx=THEMES[(THEMES.indexOf(cur)+1)%THEMES.length];
+    document.documentElement.setAttribute('data-theme',nx);
+    try{localStorage.setItem('tpv_theme',nx);}catch(e){}
+    applyThemeIcon();redraw();
+  };
+  applyThemeIcon();
+
+  /* ---- 关于 / 开发报告 / 更新记录 ---- */
+  const CHANGELOG=[
+    {v:'0.05.2',date:'2025-08-06',items:[
+      '修复 v0.04 引入的回归：缩略图初始化 miniInit() 中读取 localStorage.tpv_mini 未加保护',
+      '在预览/内嵌的 opaque-origin sandbox（sandbox="allow-scripts" 无 allow-same-origin）中，localStorage 访问会抛 SecurityError',
+      '该未捕获异常会冒泡中断启动序列，导致紧随其后的 bind() 永不执行——所有按钮（打开/选择 Trace/缩放/关联等）无响应',
+      '根因与用户反馈一致：v0.03 无 minimap（无 miniInit）正常；v0.04 加入 minimap 后引入此未保护读取导致按钮失效',
+      '修复方式：对 tpv_mini 读取用 try/catch 包裹（与主题/字典等其他 localStorage 访问的保护方式一致）；localStorage 不可用时回退到默认位置 bottom',
+      '新增 opaque-origin 沙箱回归测试（regress_opaque.mjs）：在 allow-scripts 沙箱中验证所有关键按钮 onclick 已绑定且无 localStorage 报错'
+    ]},
+    {v:'0.05.1',date:'2025-08-05',items:[
+      '修复：打开 Trace / 选择文件 按钮在部分浏览器或内嵌环境下"无响应"',
+      '隐藏文件输入由 display:none 改为 .hideinput（opacity/位移隐藏），确保 .click() 可靠弹出文件对话框',
+      '新增「选择 Trace 文件夹」按钮，支持 webkitdirectory 目录选择，自动挑选目录内首个 trace 文件加载',
+      '表头 z-index 提升至 60，确保始终位于加载遮罩之上，头部按钮始终可点',
+      'loadFile 增加异常捕获与失败提示，避免静默无响应',
+      '新增「粘贴 Trace 文本」加载回退：在预览/沙箱环境（原生文件对话框被拦截）下，粘贴文本即可加载，无需文件对话框'
+    ]},
+    {v:'0.05',date:'2025-08-05',items:[
+      '修复：加载前 #loader 全屏遮罩拦截舞台区域所有点击（表现为"按钮无响应"），改为点击任意处触发文件选择',
+      '新增关联高亮功能：选中事件后，按「同 PC」或「同 ADDL（缓存行）」维度高亮并连线相关事件',
+      '关联高亮覆盖时序泳道 / 流水线事务 / 访存分析-地址时间 三类画布视图，含虚线连接 + 端点圆圈 + 相关点描边',
+      '详情面板新增「关联高亮」摘要区，显示匹配键、可见相关事件数及快捷跳转按钮（最多显示前16个）',
+      '侧边栏「显示选项」新增关联模式下拉选择器（关闭 / 同 PC / 同 ADDL）',
+      '关联绘制上限 REL_MAX=400 防止极端缩放下重绘卡顿'
+    ]},
+    {v:'0.04',date:'2025-08-05',items:[
+      '时间轴缩略图（minimap）：时序泳道 / 流水线事务 / 访存分析-地址时间 三类时间轴视图统一接入',
+      '全量可见事件的密度直方图 + 可拖拽/缩放的时间窗矩形',
+      '拖拽矩形内部=平移；拖拽左右边缘=缩放筛选；矩形外点击=以该点为中心重定位；双击=全范围',
+      '缩略图位置可切到主视图上方 / 下方 / 关闭，配置持久化（localStorage.tpv_mini）',
+      '缩略图启用时，时序泳道画布内自带的底部导航条自动隐藏，由缩略图统一接管导航'
+    ]},
+    {v:'0.03',date:'2025-08-05',items:[
+      '新增「访存分析」标签页（针对包含 ADDL 的事件），提供四种分析视图',
+      '地址-时间视图：以散点呈现每次访存的「周期 × 地址」，可选地址轴按缓存行分行',
+      '地址热点 Top-N：按缓存行访问频次排序，展示类型构成与周期跨度',
+      '访问步幅分布：基于全局时间序的地址增量直方图（跨次访存的步长分布）',
+      '重访间隔分布：同一缓存行相邻两次访问的周期间隔分桶直方图',
+      '四类视图均联动筛选 / 主题 / 事件高亮，支持悬停提示、点击定位、缩放平移'
+    ]},
+    {v:'0.02',date:'2025-08-04',items:[
+      '新增版本号与作者信息（标题栏、meta、logo 角标均显示 v0.02 · konglingjun）',
+      '支持三套背景主题：深色 / 浅色（白）/ 米色（护眼），字体与 UI 颜色随主题同步',
+      '主题切换可持久化（localStorage），刷新后保持上次选择',
+      '流水线事务视图「缓存行生命周期」新增「同 ADDL 合并成一行」选项',
+      '新增本「关于」弹窗，内嵌开发报告摘要与更新记录',
+      '同步产出《开发报告.md》《更新记录.md》两份文档置于工作目录'
+    ]},
+    {v:'0.01',date:'2025-08-03',items:[
+      '首个可用版本：单文件离线 HTML 分析器',
+      '时序泳道 / 流水线事务 / 事件表 / 统计分析 / 语义字典 五个视图',
+      '基于 IID 的 Load 流水线重建（PIPE3→DA→WB）、预取生命周期、缓存行分段',
+      '校准复核后修复：缺失 lat、预取误关联、lsuByAddl 未排序、负 plotW 崩溃',
+      '补充 L1 miss 判定、预取四象限、Store→AW 弱关联提示与可调关联窗口'
+    ]}
+  ];
+  function renderAbout(){
+    let h='';
+    h+='<h4>基本信息</h4><ul>'
+      +'<li>版本：<code>v0.05.2</code>　作者：<code>konglingjun</code></li>'
+      +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
+      +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
+    h+='<h4>工具定位</h4>'
+      +'<p>面向 openC910 CPU 访存 trace 的前端分析器，把「时间 / 事件类型 / PC / 缓存行首地址」等半结构化记录，'
+      +'以 pipeline 形式交互式呈现，覆盖时序、事务链路、统计与语义字典，辅助定位缓存一致性与预取的时序问题。</p>';
+    h+='<h4>主要功能</h4><ul>'
+      +'<li><b>时序泳道</b>：按事件类型分行，Canvas 绘制时间轴，支持缩放/平移/框选</li>'
+      +'<li><b>流水线事务</b>：Load 流水线、预取生命周期、缓存行生命周期、Store 指令四种聚合视图</li>'
+      +'<li><b>事件表</b>：虚拟滚动的明细表，支持通用列 / 全字段</li>'
+      +'<li><b>统计分析</b>：按类型、延迟、预取命中率等维度汇总</li>'
+      +'<li><b>语义字典</b>：事件类型与各字段含义说明</li>'
+      +'<li><b>访存分析</b>：地址-时间散点、地址热点、步幅分布、重访间隔四类视图</li></ul>';
+    h+='<h4>数据格式</h4>'
+      +'<p>每行一条记录，分号分隔的 KV 结构：<code>&lt;TIME&gt;; &lt;TAG&gt;; KEY:VALUE; ...</code>。'
+      +'解析时以 1 周期 = 100000 时间单位（可改）归一化，并按 ADDL 建立缓存行索引。</p>';
+    h+='<h4>更新记录</h4><table class="verrow"><thead><tr><th>版本</th><th>日期</th><th>变更</th></tr></thead><tbody>';
+    for(const c of CHANGELOG){
+      h+='<tr class="verrow"><td>v'+c.v+'</td><td>'+c.date+'</td><td><ul style="margin:2px 0">'
+        +c.items.map(x=>'<li>'+x+'</li>').join('')+'</ul></td></tr>';
+    }
+    h+='</tbody></table>';
+    $('aboutBody').innerHTML=h;
+  }
+  function openAbout(){renderAbout();$('aboutModal').classList.add('on');}
+  function closeAbout(){$('aboutModal').classList.remove('on');}
+  $('btnAbout').onclick=openAbout;
+  $('aboutClose').onclick=closeAbout;
+  $('aboutModal').addEventListener('click',e=>{if(e.target===$('aboutModal'))closeAbout();});
+  $('btnCsv').onclick=exportCsv;
+  $('btnPng').onclick=exportPng;
+  $('dClose').onclick=()=>{$('detail').classList.remove('on');S.sel=-1;S.hlAddl=null;S.relSet=null;redraw();};
+
+  document.querySelectorAll('.sec>h3').forEach(hh=>hh.onclick=()=>hh.parentElement.classList.toggle('closed'));
+  $('tagAll').onclick=e=>{e.stopPropagation();for(const t of S.tags)S.tagOn[t]=true;applyFilter();};
+  $('tagNone').onclick=e=>{e.stopPropagation();for(const t of S.tags)S.tagOn[t]=false;applyFilter();};
+
+  let dt=null;
+  const deb=()=>{clearTimeout(dt);dt=setTimeout(applyFilter,220);};
+  ['fPc','fAddl','fIid','fText','fExpr','fT0','fT1'].forEach(id=>$(id).addEventListener('input',deb));
+  ['oLink','oAddr','oLabel','oGrid'].forEach(id=>$(id).onchange=redraw);
+  $('relMode').onchange=()=>{S.relMode=$('relMode').value;computeRel();redraw();};
+  $('oCyc').onchange=()=>{
+    const v=Number($('oCyc').value)||1;
+    S.cycUnit=v;
+    for(const e of S.raw)e.cyc=Math.round((e.t-S.tmin)/v);
+    S.minCyc=S.raw.length?S.raw[0].cyc:0;
+    S.maxCyc=S.raw.length?S.raw[S.raw.length-1].cyc:1;
+    buildTxns();applyFilter();tlFit();
+  };
+  $('btnWin').onclick=()=>{
+    const g=(id,dv)=>{const v=Number($(id).value);return isFinite(v)&&v>=0?v:dv;};
+    S.win.l2cmp=g('wL2',80);S.win.axiar=g('wAr',4000);
+    S.win.pfLead=g('wLead',4096);S.win.stAw=g('wAw',500);S.win.lineGap=g('wGap',2000);
+    buildTxns();PV.scroll=0;redraw();
+    msg('已按新窗口重算事务链路');
+  };
+  $('btnFitWin').onclick=()=>{
+    applyFilter();
+    const a=$('fT0').value.trim(),b=$('fT1').value.trim();
+    if(a!==''&&b!==''){TL.t0=Number(a);TL.t1=Number(b);tlDraw();}else tlFit();
+  };
+  $('tlFit').onclick=tlFit;
+  $('tlIn').onclick=()=>tlZoom(1/1.5);
+  $('tlOut').onclick=()=>tlZoom(1.5);
+  ['pvKind','pvSort','pvSlow','pvMerge'].forEach(id=>$(id).onchange=()=>{PV.scroll=0;pvBuild();pvDraw();});
+  $('pvRowUp').onclick=()=>{PV.rowH=Math.min(40,PV.rowH+3);pvDraw();};
+  $('pvRowDn').onclick=()=>{PV.rowH=Math.max(8,PV.rowH-3);pvDraw();};
+  $('tbCols').onchange=tbRender;
+  $('accView').onchange=()=>{ACC.view=$('accView').value;ACC.hover=null;accRender();miniMount();};
+  $('accAxis').onchange=()=>{ACC.axis=$('accAxis').checked?'row':'num';ACC.hover=null;accRender();};
+  $('accK').onchange=()=>{ACC.k=Math.max(5,Math.min(300,parseInt($('accK').value)||40));accRender();};
+
+  window.addEventListener('keydown',e=>{
+    if(e.target.matches('input,textarea'))return;
+    if(e.key==='f'||e.key==='F'){tlFit();}
+    if(e.key==='Escape'){$('detail').classList.remove('on');S.sel=-1;S.hlAddl=null;S.relSet=null;redraw();}
+    if(e.key==='1')switchPane('timeline');
+    if(e.key==='2')switchPane('pipeline');
+    if(e.key==='3')switchPane('table');
+    if(e.key==='4')switchPane('stats');
+    if(e.key==='5')switchPane('dict');
+    if(e.key==='6')switchPane('access');
+    if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
+      const d=(TL.t1-TL.t0)*0.15*(e.key==='ArrowLeft'?-1:1);
+      TL.t0+=d;TL.t1+=d;tlDraw();
+    }
+  });
+  window.addEventListener('resize',()=>{tlResize();pvResize();accResize();redraw();});
+  $('btnMini').onclick=miniCycle;
+}
+
+/* =======================================================================
+   16. 启动
+   ======================================================================= */
+tlInit();pvInit();accInit();miniInit();bind();
+tlResize();pvResize();accResize();tlDraw();miniMount();
+</script>
+</body>
+</html>
