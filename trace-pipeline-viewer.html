@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06.1</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06.2</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06.1">
+<meta name="version" content="0.06.2">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -267,7 +267,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06.1 · 作者 konglingjun">v0.06.1</span></div>
+    <span class="ver" id="verTag" title="版本 0.06.2 · 作者 konglingjun">v0.06.2</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -348,6 +348,7 @@ table.st td.num{text-align:right}
         <div class="field"><label>预取「及时有用」提前量上限</label><input class="inp" id="wLead" value="4096"></div>
         <div class="field"><label>Store → AW 窗口</label><input class="inp" id="wAw" value="500"></div>
         <div class="field"><label>缓存行分段间隔</label><input class="inp" id="wGap" value="2000"></div>
+        <div class="field"><label>冗余预取判定窗口（缓存驻留）</label><input class="inp" id="wResid" value="8192"></div>
         <button class="btn primary sm" id="btnWin" style="width:100%">重算事务链路</button>
       </div>
     </div>
@@ -676,7 +677,7 @@ const S={
   pane:'timeline',
   // 事务关联的启发式窗口（周期）。这些不是 trace 里的硬信息，
   // 而是"按 ADDL + 时间邻近"推断出来的，取值会显著影响结论，故做成可调。
-  win:{l2cmp:80, axiar:4000, stAw:500, pfLead:4096, lineGap:2000}
+  win:{l2cmp:80, axiar:4000, stAw:500, pfLead:4096, lineGap:2000, pfResid:8192}
 };
 const $=id=>document.getElementById(id);
 const fmt=n=>n.toLocaleString('en-US');
@@ -700,6 +701,13 @@ function isXZ(v){
 }
 /* 返回该事件中第一个处于未定义态的字段名，没有则返回 null */
 function xzField(e){for(const k in e.d)if(isXZ(e.d[k]))return k;return null;}
+
+/* 数组求最值：一律走循环，不用 Math.max(...arr)。
+   spread 会把每个元素铺成一个实参，数组超过约 12 万个元素就触发
+   RangeError: Maximum call stack size exceeded。直方图/分桶的长度取决于输入数据，
+   看着"肯定不大"的数组在病态 trace 上完全可能爆掉。 */
+function maxOf(arr,init){let m=(init===undefined?-Infinity:init);for(let i=0;i<arr.length;i++)if(arr[i]>m)m=arr[i];return m;}
+function minOf(arr,init){let m=(init===undefined?Infinity:init);for(let i=0;i<arr.length;i++)if(arr[i]<m)m=arr[i];return m;}
 
 /* =======================================================================
    2. 解析
@@ -891,6 +899,20 @@ function buildTxns(){
       // 只有在提前量窗口内被访问才算"及时有用"；过早预取大概率已被替换出去
       if(accepted&&o.lead<=W.pfLead){o.useful=1;o.stages.push({name:'被使用',cyc:raw[u].cyc,idx:u,tag:raw[u].tag});}
       else o.early=1;
+    }
+    /* 冗余预取：预取发出时该行「很可能仍在缓存里」，这次预取白做。
+       判据是「上一次 demand 访问距今 ≤ pfResid（缓存驻留窗口）」。
+       ⚠ 不能像某些实现那样"只要之前访问过就算冗余"——一条行在十万周期前被读过，
+       早就被替换出去了，此时重新预取完全正确，那样统计会把正常预取大批误判成冗余。 */
+    const arr=lsuByAddl.get(a);
+    if(arr&&arr.length){
+      let lo=0,hi=arr.length;                       // 二分找最后一个 cyc < 预取时刻
+      while(lo<hi){const mid=(lo+hi)>>1;if(raw[arr[mid]].cyc<e.cyc)lo=mid+1;else hi=mid;}
+      if(lo>0){
+        const prev=raw[arr[lo-1]].cyc;
+        o.prevUse=e.cyc-prev;
+        if(o.prevUse<=W.pfResid){o.redundant=1;o.prevIdx=arr[lo-1];}
+      }
     }
     T.prefetch.push(seal(o));
   }
@@ -1944,6 +1966,8 @@ function statsRender(){
   const pfAcc=pfs.filter(o=>o.accepted).length;
   const pfUse=pfs.filter(o=>o.useful).length;
   const pfEarly=pfs.filter(o=>o.early).length;
+  const pfRedun=pfs.filter(o=>o.redundant).length;
+  const prevs=pfs.filter(o=>o.prevUse!==undefined).map(o=>o.prevUse).sort((a,b)=>a-b);
   const leads=pfs.filter(o=>o.usedLater).map(o=>o.lead).sort((a,b)=>a-b);
   const ql=p=>leads.length?leads[Math.min(leads.length-1,Math.floor(leads.length*p))]:0;
 
@@ -1971,6 +1995,8 @@ function statsRender(){
     h+=card('预取请求',fmt(pfs.length),'L2 接收率 '+pct(pfAcc,pfs.length));
     h+=card('及时有用预取',pct(pfUse,pfs.length),'提前量 ≤ '+fmt(S.win.pfLead)+' 周期',pfUse/pfs.length>.5?'#52d38a':'#f0a03c');
     h+=card('过早预取',pct(pfEarly,pfs.length),'被访问时已远超窗口','#f0a03c');
+    h+=card('冗余预取',pct(pfRedun,pfs.length),'上次访问距今 ≤ '+fmt(S.win.pfResid)+' 周期，行可能仍在缓存',
+      pfRedun/pfs.length>.2?'#f0a03c':null);
   }
   if(xTotal)h+=card('⚠ 仿真未定义态',fmt(xTotal),
     xEnts.slice(0,3).map(e=>e[0]).join(' · ')+(xEnts.length>3?' 等 '+xEnts.length+' 个字段':''),'#ff5f6d');
@@ -2009,7 +2035,7 @@ function statsRender(){
   if(lat.length){
     const hist={};for(const l of lat)hist[l]=(hist[l]||0)+1;
     const hs=Object.entries(hist).map(([k,v])=>[+k,v]).sort((a,b)=>a[0]-b[0]);
-    const hmx=Math.max(...hs.map(x=>x[1]));
+    const hmx=maxOf(hs.map(x=>x[1]),1);   // hs 长度 = 唯一延迟值个数，由输入决定，不能用 spread
     const missLat=done.filter(o=>o.miss).map(o=>o.lat).sort((a,b)=>a-b);
     h+='<div class="panel"><h4>Load 流水线延迟分布（PIPE3 → WB）</h4>'
       +'<div class="hint">仅统计观测到 WB 的 '+fmt(done.length)+' 条事务。'
@@ -2047,7 +2073,51 @@ function statsRender(){
     h+=card('进入 L2 流水线',fmt(inL2),'窗口 '+fmt(S.win.l2cmp)+' cyc');
     h+=card('触发 AXI 读',fmt(inAR),'窗口 '+fmt(S.win.axiar)+' cyc');
     h+=card('从未被访问',fmt(never),pct(never,pfs.length));
+    h+=card('冗余预取',fmt(pfRedun),'行可能仍驻留',pfRedun?'#f0a03c':null);
     h+='</div>';
+
+    /* 冗余预取：预取时该行可能仍在缓存里 —— 白做的那部分 */
+    {
+      h+='<h4 style="margin-top:13px">冗余预取（预取时该行可能仍驻留缓存）</h4>'
+        +'<div class="hint">判据是<b>「上一次 demand 访问距预取时刻 ≤ '+fmt(S.win.pfResid)+' 周期」</b>：'
+        +'刚访问过的行大概率还在 L2 里，此时再预取一次不产生收益，只消耗带宽和 MSHR 表项。<br>'
+        +'<b style="color:var(--warn)">注意口径</b>：不能简单用「以前访问过就算冗余」——'
+        +'一条行在十万周期前被读过，早已被替换出去，那时重新预取完全正确。'
+        +'驻留窗口应按 L2 容量与工作集大小估算，可在侧栏「关联窗口」调整。</div>';
+      if(prevs.length){
+        const rb2=[[0,64],[64,256],[256,1024],[1024,4096],[4096,16384],[16384,65536],[65536,Infinity]];
+        const rc=rb2.map(()=>0);
+        for(const p of prevs){for(let i=0;i<rb2.length;i++)if(p>=rb2[i][0]&&p<rb2[i][1]){rc[i]++;break;}}
+        const rmx=maxOf(rc,1);
+        h+='<table class="st"><tr><th>距上次访问</th><th class="num">预取数</th><th></th><th class="num">占比</th></tr>';
+        for(let i=0;i<rb2.length;i++){
+          const lb=rb2[i][1]===Infinity?('≥ '+fmt(rb2[i][0])+' cyc'):(fmt(rb2[i][0])+' – '+fmt(rb2[i][1])+' cyc');
+          const inWin=rb2[i][0]<S.win.pfResid;
+          h+=barRow((inWin?'<span style="color:var(--warn)">':'<span style="color:var(--ok)">')+lb
+            +(inWin?' <span style="font-size:9.5px">判为冗余</span>':'')+'</span>',rc[i],rmx,pct(rc[i],prevs.length));
+        }
+        h+='</table>'
+          +'<div style="margin-top:8px;font-size:11px;color:var(--fg2);font-family:var(--mono)">'
+          +'共 '+fmt(prevs.length)+' 条预取此前访问过该行 · 间隔 P10 '+fmt(prevs[Math.floor(prevs.length*.1)])
+          +' · P50 '+fmt(prevs[prevs.length>>1])
+          +' · P90 '+fmt(prevs[Math.floor(prevs.length*.9)])+' 周期</div>';
+        /* 驻留窗口敏感性：换个窗口，冗余率差多少 */
+        h+='<div style="margin-top:10px"><b style="font-size:11.5px">驻留窗口敏感性</b>'
+          +'<table class="st" style="margin-top:5px"><tr><th>驻留窗口</th><th class="num">判为冗余</th><th></th><th class="num">占全部预取</th></tr>';
+        for(const w of [256,1024,4096,8192,32768,Infinity]){
+          const c3=prevs.filter(p=>p<=w).length;
+          const lb=w===Infinity?'不限（最激进口径）':'≤ '+fmt(w)+' cyc';
+          h+='<tr'+(w===S.win.pfResid?' style="background:var(--rowHi)"':'')+'>'
+            +'<td>'+lb+(w===S.win.pfResid?' <span style="color:var(--acc)">◀ 当前</span>':'')+'</td>'
+            +'<td class="num">'+fmt(c3)+'</td>'
+            +'<td style="width:30%"><div class="bar"><i style="width:'+(c3/pfs.length*100).toFixed(1)+'%;background:var(--warn)"></i></div></td>'
+            +'<td class="num">'+pct(c3,pfs.length)+'</td></tr>';
+        }
+        h+='</table></div>';
+      }else{
+        h+='<div class="hint" style="color:var(--ok)">没有任何预取的目标行在此之前被访问过 —— 预取全部指向"新"地址，无冗余。</div>';
+      }
+    }
 
     /* 四象限判定 */
     const quad=[
@@ -2056,7 +2126,7 @@ function statsRender(){
       ['○ 从未使用',never,'#6b7889','预取进来后没有任何访问 —— 纯粹的带宽与容量浪费'],
       ['✕ 被反压',pfs.length-pfAcc,'#ff5f6d','L2 未接收（READY=0），请求直接丢弃']
     ];
-    const qmx=Math.max(...quad.map(x=>x[1]),1);
+    const qmx=maxOf(quad.map(x=>x[1]),1);
     h+='<h4 style="margin-top:13px">预取结果四象限</h4>'
       +'<table class="st"><tr><th>判定</th><th class="num">数量</th><th></th><th class="num">占比</th></tr>';
     for(const [lb,v,c,tip] of quad){
@@ -2072,7 +2142,7 @@ function statsRender(){
       const buckets=[[0,16],[16,64],[64,256],[256,1024],[1024,4096],[4096,16384],[16384,Infinity]];
       const bc=buckets.map(()=>0);
       for(const l of leads){for(let i=0;i<buckets.length;i++)if(l>=buckets[i][0]&&l<buckets[i][1]){bc[i]++;break;}}
-      const bmx=Math.max(...bc,1);
+      const bmx=maxOf(bc,1);
       h+='<h4 style="margin-top:15px">预取提前量（Timeliness）累积分布</h4>'
         +'<div class="hint">预取发出到该行首次被真实访问之间的周期数，统计口径为「曾被访问过」的 '+fmt(leads.length)+' 条。'
         +'提前量太小来不及隐藏延迟；太大则在被用到之前就可能已被替换出 L2。下表同时给出不同判定阈值下的有用率，'
@@ -2868,7 +2938,7 @@ function accDrawReuse(C,c){
   cx.fillText('<1000c '+(lt1000/c.reuseTotal*100).toFixed(1)+'%',420,40);
   cx.fillStyle=C.fg3;cx.font='10.5px '+mono;
   cx.fillText('短间隔占比高 → 时间局部性好、易被 L1/L2 命中；长尾 → 未命中或缓存行已被替换',12,60);
-  const mx=Math.max(...rb,1),rowH=Math.max(16,plotH/rb.length);
+  const mx=maxOf(rb,1),rowH=Math.max(16,plotH/rb.length);
   ACC.points=[];
   for(let b=0;b<rb.length;b++){
     const cc=rb[b];const [lo,hi]=bnd[b];
@@ -3055,6 +3125,14 @@ function bind(){
 
   /* ---- 关于 / 开发报告 / 更新记录 ---- */
   const CHANGELOG=[
+    {v:'0.06.2',date:'2025-08-07',items:[
+      '【对比移植+修正】冗余预取（redundant prefetch）判定：移植另一 AI 的 core.js 思路，但修正其语义缺陷',
+      '原实现"只要该行此前被访问过就算冗余"无视时间窗口——一条行在十万周期前被读过早已被替换出去，那时重新预取完全正确，原口径会把正常预取大批误判成冗余',
+      '正确口径：仅当「上一次 demand 访问距预取时刻 ≤ 缓存驻留窗口 pfResid（默认 8192 cyc）」才判为冗余；用 lsuByAddl 二分查找该缓存行最后一次 demand 访问时刻',
+      '统计页新增「冗余预取」概览卡 + 详情小节：驻留窗口直方图（按距上次访问分桶）+ 驻留窗口敏感性表（256/1024/4096/8192/32768/不限），当前窗口行高亮标记',
+      '侧栏「关联窗口」新增「冗余预取判定窗口（缓存驻留）」输入框，可调整后点「重算事务链路」即时重算',
+      '【预防性修复】将所有 Math.max(...arr)/Math.min(...arr) 展开调用改为循环实现的 maxOf()/minOf() 助手：数组超过约 12 万个元素时 spread 会触发 RangeError 栈溢出（另一 AI 的 core.js 文档也提及此坑却仍在 core.js:339 提交了该写法）'
+    ]},
     {v:'0.06.1',date:'2025-08-07',items:[
       '修复快捷键健壮性缺陷：keydown 处理器直接调用 e.target.matches()，当事件派发到 window/document（非 Element）时抛 TypeError，导致全部快捷键失效',
       '过滤条件同时扩展到 select 与 contenteditable，避免在下拉框/可编辑区误触发快捷键',
@@ -3132,7 +3210,7 @@ function bind(){
   function renderAbout(){
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06.1</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06.2</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
@@ -3197,7 +3275,7 @@ function bind(){
   $('btnWin').onclick=()=>{
     const g=(id,dv)=>{const v=Number($(id).value);return isFinite(v)&&v>=0?v:dv;};
     S.win.l2cmp=g('wL2',80);S.win.axiar=g('wAr',4000);
-    S.win.pfLead=g('wLead',4096);S.win.stAw=g('wAw',500);S.win.lineGap=g('wGap',2000);
+    S.win.pfLead=g('wLead',4096);S.win.stAw=g('wAw',500);S.win.lineGap=g('wGap',2000);S.win.pfResid=g('wResid',8192);
     buildTxns();PV.scroll=0;redraw();
     msg('已按新窗口重算事务链路');
   };
