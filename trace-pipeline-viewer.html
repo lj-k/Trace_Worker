@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06.8</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06.9</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06.8">
+<meta name="version" content="0.06.9">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -270,7 +270,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06.8 · 作者 konglingjun">v0.06.8</span></div>
+    <span class="ver" id="verTag" title="版本 0.06.9 · 作者 konglingjun">v0.06.9</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -2036,7 +2036,7 @@ function statsRender(){
     const xmx=xEnts[0][1];
     for(const [k,c] of xEnts)h+=barRow('<span style="color:#ff5f6d">'+k+'</span>',c,xmx,pct(c,n));
     h+='</table>'
-      +'<button class="btn" id="btnGotoX" style="margin-top:10px" title="聚焦并选中第一个含未定义态（x/z）的事件">→ 跳转到首个 x 态事件（周期 '
+      +'<button class="btn" id="btnGotoX" style="margin-top:10px">→ 跳转到首个 x 态事件（周期 '
       +fmt(raw[xEvt[0]].cyc)+' · 源文件行 '+raw[xEvt[0]].ln+'）</button>'
       +'</div>';
   }
@@ -2298,7 +2298,6 @@ function statsRender(){
   });
   const gx=$('btnGotoX');
   if(gx&&xEvt.length)gx.onclick=()=>{switchPane('timeline');tlFocus(raw[xEvt[0]].cyc);selectEvent(xEvt[0],true);};
-  bindTooltips();
 }
 
 /* =======================================================================
@@ -2310,10 +2309,10 @@ function dictRender(){
     +'其中位域含义（如 <code>L2C_CMP.TYPE</code>、<code>REQS</code>）需要对照你的 RTL 编码确认。'
     +'在这里改好的标签会保存在浏览器本地，下次打开自动生效，也可以导出成 JSON 在团队里共享。</div>';
   h+='<div style="display:flex;gap:8px;margin-bottom:14px">'
-    +'<button class="btn" id="dExp" title="导出当前字段/取值标签字典为 JSON">⬇ 导出字典 JSON</button>'
-    +'<button class="btn" id="dImp" title="从 JSON 导入字段/取值标签字典">⬆ 导入字典 JSON</button>'
-    +'<button class="btn" id="dRst" title="恢复工具内置的默认字典">↺ 恢复内置默认</button>'
-    +'<input type="file" id="dFile" accept=".json" style="display:none" title="选择语义字典文件（JSON）导入">'
+    +'<button class="btn" id="dExp">⬇ 导出字典 JSON</button>'
+    +'<button class="btn" id="dImp">⬆ 导入字典 JSON</button>'
+    +'<button class="btn" id="dRst">↺ 恢复内置默认</button>'
+    +'<input type="file" id="dFile" accept=".json" style="display:none">'
     +'</div>';
 
   h+='<div class="panel"><h4>事件类型标签</h4>';
@@ -2337,11 +2336,10 @@ function dictRender(){
 
   h+='<div class="panel"><h4>取值标签（事件类型.字段 → 取值）</h4>'
     +'<div class="hint">为具体取值加中文说明，会显示在提示气泡、详情面板和统计页里。格式：一行一条 <code>TAG.FIELD.VALUE = 说明</code></div>'
-    +'<textarea class="inp" id="dVals" style="min-height:170px;font-family:var(--mono)" title="编辑语义映射（一行一条「TAG.FIELD.VALUE = 说明」；键=原始值，值=显示名）"></textarea>'
-    +'<button class="btn primary sm" id="dSaveVals" style="margin-top:8px" title="保存取值标签修改到浏览器本地">保存取值标签</button></div>';
+    +'<textarea class="inp" id="dVals" style="min-height:170px;font-family:var(--mono)"></textarea>'
+    +'<button class="btn primary sm" id="dSaveVals" style="margin-top:8px">保存取值标签</button></div>';
 
   $('dictBody').innerHTML=h;
-  bindTooltips($('dictBody'));
 
   const lines=[];
   for(const key in DICT.values)for(const v in DICT.values[key])lines.push(key+'.'+v+' = '+DICT.values[key][v]);
@@ -2409,7 +2407,6 @@ function refreshTags(){
   el.querySelectorAll('input').forEach(cb=>cb.onchange=()=>{
     S.tagOn[cb.dataset.t]=cb.checked;applyFilter();
   });
-  bindTooltips(el); // 动态生成的标签行补悬浮提示
 }
 /* =======================================================================
    11.5 时间轴缩略图（minimap）
@@ -2565,7 +2562,7 @@ function switchPane(p){
     else if(p==='stats')statsRender();
     else if(p==='access'){accResize();accRender();}
     else if(p==='dict')dictRender();
-    miniMount();bindTooltips();
+    miniMount();
   });
 }
 function redraw(){
@@ -3076,17 +3073,17 @@ function dl(name,content,type){
 }
 
 /* =======================================================================
-   交互对象悬浮提示：为按钮 / 开关 / 选项 / 输入 / 标签页 / 折叠节 / 动态标签行 /
-   事件表与统计卡片等补充 title，悬浮即显示功能说明。
-   - 先按 id 字典赋值（curated，质量最好）；
-   - 再对无 title 的交互元素按类型/类名兜底；
-   - 海量数据行（事件表/统计卡）用懒加载式 mouseover 首次悬浮时补充，避免一次性扫描。
-   幂等：已有 title 的元素不被覆盖。 */
-function bindTooltips(root){
-  root=root||document;
+   交互对象悬浮提示（自定义 #tip 气泡，禁用原生 title，彻底消除原生 tooltip 引发的闪烁）
+   - 一处 curated 字典（按 id）给出最准确的中文说明；
+   - 其余按 标签 / 类名 兜底推导文案；
+   - 在 #app 上用事件委托（mouseover / mouseout / mousemove）于悬浮时弹出 #tip 气泡，
+     不设置任何原生 title 属性，因此不会触发浏览器原生 tooltip 的整窗闪烁。 */
+function bindTips(){
   const TIP={
     btnSide:'折叠 / 展开左侧过滤侧栏',
     btnOpen:'打开并加载一个 Trace 文件（也可从文件夹批量选择）',
+    btnPng:'导出当前视图为 PNG（范围见左侧下拉：全画布 / 有效区域 / 整页）',
+    btnSvg:'导出当前视图为 SVG（矢量，范围见左侧下拉：全画布 / 有效区域 / 整页）',
     fPc:'按 PC 子串过滤（多个用逗号分隔），命中即显示',
     fAddl:'按缓存行 ADDL 子串过滤',
     fIid:'按指令 ID / IID 过滤',
@@ -3121,44 +3118,49 @@ function bindTooltips(root){
     pcBox:'用方框框住选中事件所属 PC 的其它访问（需关联高亮=同PC）',
     accK:'地址热点 Top-N 行数',
     dFile:'选择语义字典文件（JSON）导入',
-    dVals:'编辑语义映射（键=原始值，值=显示名），每行一条',
+    dVals:'编辑语义映射（一行一条「TAG.FIELD.VALUE = 说明」；键=原始值，值=显示名）',
     tbCols:'事件表显示列配置',
-    btnGotoX:'跳转到指定周期 / 事件',
+    btnGotoX:'跳转到首个含未定义态（x/z）的事件',
     btnPasteLoad:'将粘贴框中的 Trace 文本加载为数据源',
     btnPasteClear:'清空粘贴框',
     pasteArea:'在此粘贴 Trace 文本（文件对话框被拦截时的回退加载方式）'
   };
-  for(const id in TIP){ const el=root.getElementById?root.getElementById(id):null; if(el&&!el.title)el.title=TIP[id]; }
-  const sel='button,input,select,textarea,.tab,.tagrow,.chip,.sec>h3,a[href],.lgi,[role=button]';
-  root.querySelectorAll(sel).forEach(el=>{
-    if(el.title)return;
+  const SEL='button,input,select,textarea,.tab,.tagrow,.chip,.sec>h3,a[href],.lgi,.vtrow,.card,.kv';
+  function tipText(el){
+    if(!el)return '';
+    if(el.id&&TIP[el.id])return TIP[el.id];
     const tag=el.tagName.toLowerCase();
-    if(el.classList.contains('tab')){ el.title='切换到「'+el.textContent.trim()+'」视图'; return; }
-    if(el.classList.contains('tagrow')){ el.title='点击切换该事件类型的显示 / 隐藏'; return; }
-    if(el.classList.contains('chip')){ el.title=el.textContent.trim(); return; }
-    if(el.classList.contains('lgi')){ el.title=el.textContent.trim(); return; }
-    if(tag==='h3'){ el.title='点击展开 / 折叠此节'; return; }
-    if(tag==='a'){ el.title=el.textContent.trim()||(el.getAttribute('href')||''); return; }
-    if(tag==='button'){ const t=el.textContent.replace(/[⬇◐🗺▼▲▣◑\s]/g,'').trim(); el.title=t?('点击：'+t):'操作按钮'; return; }
+    if(el.classList.contains('tab'))return '切换到「'+el.textContent.trim()+'」视图';
+    if(el.classList.contains('tagrow'))return '点击切换该事件类型的显示 / 隐藏';
+    if(el.classList.contains('chip'))return el.textContent.trim();
+    if(el.classList.contains('lgi'))return el.textContent.trim();
+    if(tag==='h3')return '点击展开 / 折叠此节';
+    if(tag==='a')return el.textContent.trim()||(el.getAttribute('href')||'');
+    if(tag==='button'){const t=el.textContent.replace(/[⬇◐🗺▼▲▣◑\s]/g,'').trim();return t?('点击：'+t):'操作按钮';}
     if(tag==='input'){
-      if(el.type==='checkbox'&&el.closest('.tagrow')){ const p=el.closest('.tagrow'); el.title=p.title||'点击切换该事件类型的显示 / 隐藏'; return; } // 复选框随外层 .tagrow 同提示
-      el.title=el.placeholder||('输入：'+(el.id||'')); return;
+      if(el.type==='checkbox'){const p=el.closest('.tagrow');return p?tipText(p):(el.placeholder||('输入：'+(el.id||'')));}
+      return el.placeholder||('输入：'+(el.id||''));
     }
-    if(tag==='select'){ el.title='选择：'+(el.options[el.selectedIndex]?el.options[el.selectedIndex].text:''); return; }
-    if(tag==='textarea'){ el.title=el.placeholder||'输入文本'; return; }
+    if(tag==='select')return '选择：'+(el.options[el.selectedIndex]?el.options[el.selectedIndex].text:'');
+    if(tag==='textarea')return el.placeholder||'输入文本';
+    return '';
+  }
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  // 清除所有原生 title，避免原生 tooltip 闪烁；统一由 #tip 气泡呈现
+  try{ document.querySelectorAll(SEL).forEach(el=>{ if(el.title)el.removeAttribute('title'); }); }catch(e){}
+  const app=$('app'); if(!app)return;
+  let cur=null;
+  app.addEventListener('mouseover',e=>{
+    const el=e.target.closest?e.target.closest(SEL):null;
+    if(el&&el.title)el.removeAttribute('title'); // 兜底：动态元素若残留原生 title，悬浮即清除，避免原生 tooltip 闪烁
+    if(el&&el!==cur){ const t=tipText(el); if(t){cur=el; showTip('<div class="kv">'+esc(t)+'</div>', e.clientX, e.clientY);} }
   });
-}
-function lazyTip(){
-  document.addEventListener('mouseover',e=>{
-    const t=e.target; if(!t||!t.closest)return;
-    const el=t.closest('.vtrow,.card,.lgi,.kv');
-    if(el&&!el.title){
-      if(el.classList.contains('vtrow'))el.title='点击查看该事件详情';
-      else if(el.classList.contains('card'))el.title=el.querySelector('h4')?el.querySelector('h4').textContent.trim():'统计卡片';
-      else if(el.classList.contains('lgi'))el.title=el.textContent.trim();
-      else if(el.classList.contains('kv'))el.title=el.textContent.trim();
-    }
-  },true);
+  app.addEventListener('mousemove',e=>{
+    if(cur){ const t=tipText(cur); if(t) showTip('<div class="kv">'+esc(t)+'</div>', e.clientX, e.clientY); }
+  });
+  app.addEventListener('mouseout',e=>{
+    if(cur&&!cur.contains(e.relatedTarget)){ cur=null; hideTip(); }
+  });
 }
 
 /* =======================================================================
@@ -3382,11 +3384,129 @@ function exportPng(){
 }
 
 /* =======================================================================
-   PNG / SVG 导出 · SVG 变体
+   PNG / SVG 导出 · SVG 变体（全部为矢量）
    复用左侧「范围」下拉（pngMode）：整页 / 整个画布 / 有效区域。
-   - 整页：foreignObject 序列化 #app DOM → SVG 源（SVG 文件本身不受 Chromium 对
-     foreignObject 画布的 taint 限制，可直接存盘，浏览器打开即矢量渲染）；
-   - 画布类：内嵌 <image> 承载位图，full=整张画布，crop=按内容包围盒裁剪。 */
+   矢量实现：makeSvgCtx() 提供一个「录制型」Canvas2D 上下文，临时替换各视图的
+   真实 ctx 后重新跑一遍既有绘制函数（tlDraw / accRender / pvDraw / miniDraw），
+   把 fillRect / stroke / path / fillText 等调用录制成真正的 SVG 图元（<rect>/
+   <path>/<text>），而非把画布位图塞进 <image>。这样导出的 SVG 可任意缩放不失真。
+   - 整页：foreignObject 序列化 #app DOM，其中每个 <canvas> 被替换为录制得到的矢量 <svg>；
+   - 整个画布：录制当前激活画布为矢量 <svg>；
+   - 有效区域：录制后按内容包围盒设置 viewBox 裁剪。 */
+function makeSvgCtx(){
+  const N=(n,a)=>({n:n,a:a||{},c:[],t:''});
+  const root=N('svg',{}), defs=N('defs'), content=N('g');
+  root.c.push(defs,content);
+  let cur=content;
+  let m=[1,0,0,1,0,0];
+  const stk=[];
+  let st={fill:'#000',stroke:'none',lw:1,font:'10px sans-serif',ta:'left',tb:'alphabetic',ga:1,dash:[]};
+  let path=[]; let cid=0;
+  function mul(t){const a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],A=t[0],B=t[1],C=t[2],D=t[3],E=t[4],F=t[5];
+    m=[a*A+c*B,b*A+d*B,a*C+c*D,b*C+d*D,a*E+c*F+e,b*E+d*F+f];}
+  function tp(x,y){return [m[0]*x+m[2]*y+m[4], m[1]*x+m[3]*y+m[5]];}
+  function sx(){return Math.hypot(m[0],m[1])||1;}
+  function sy(){return Math.hypot(m[2],m[3])||1;}
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function col(c){if(!c||typeof c!=='string')return 'none';c=c.trim();if(c==='transparent')return 'none';return c;}
+  function attrs(o){let s='';for(const k in o){const v=o[k];if(v===null||v===undefined||v==='')continue;s+=' '+k+'="'+esc(v)+'"';}return s;}
+  function ser(nd){
+    if(nd.n==='text')return '<text'+attrs(nd.a)+'>'+esc(nd.t)+'</text>';
+    let s='<'+nd.n+attrs(nd.a); if(!nd.c.length){s+='/>';return s;}
+    s+='>'; for(const ch of nd.c)s+=ser(ch); s+='</'+nd.n+'>'; return s;
+  }
+  function dstr(cmds){let d='';for(const c of cmds){
+    if(c[0]==='M')d+='M'+c[1].toFixed(2)+' '+c[2].toFixed(2);
+    else if(c[0]==='L')d+='L'+c[1].toFixed(2)+' '+c[2].toFixed(2);
+    else if(c[0]==='Z')d+='Z';} return d;}
+  function parseFont(s){s=String(s||'');const mw=/(\d+(?:\.\d+)?)px/.exec(s);const size=mw?mw[1]:'10';
+    let weight='normal';if(/\bbold\b/.test(s))weight='bold';else{const wn=/([1-9]00)\b/.exec(s);if(wn)weight=wn[1];}
+    let fam=s.replace(/^(normal|bold|italic|oblique|\d+(?:\.\d+)?px)\s*/g,'').trim().replace(/"/g,"'");
+    if(!fam)fam='sans-serif';return {size,weight,family:fam};}
+  function addPath(extra){if(!path.length)return;const d=dstr(path);
+    cur.c.push(N('path',Object.assign({d:d},extra)));}
+  return {
+    canvas:{width:0,height:0},
+    save(){stk.push({m:m.slice(),st:Object.assign({},st),cur:cur});},
+    restore(){const f=stk.pop();if(!f)return;m=f.m;st=f.st;cur=f.cur;},
+    beginPath(){path=[];},
+    closePath(){path.push(['Z']);},
+    moveTo(x,y){const p=tp(x,y);path.push(['M',p[0],p[1]]);},
+    lineTo(x,y){const p=tp(x,y);path.push(['L',p[0],p[1]]);},
+    rect(x,y,w,h){const a=tp(x,y),b=tp(x+w,y),c=tp(x+w,y+h),d=tp(x,y+h);
+      path.push(['M',a[0],a[1]],['L',b[0],b[1]],['L',c[0],c[1]],['L',d[0],d[1]],['Z']);},
+    arc(x,y,r,a0,a1,ccw){const c0=tp(x,y);const rr=r*((sx()+sy())/2);
+      const steps=Math.max(6,Math.ceil(Math.abs(a1-a0)/0.25));const dir=ccw?-1:1;
+      for(let i=0;i<=steps;i++){const a=a0+dir*(a1-a0)*(i/steps);
+        const qx=c0[0]+rr*Math.cos(a),qy=c0[1]+rr*Math.sin(a);path.push([i===0?'M':'L',qx,qy]);}},
+    fill(){addPath({fill:col(st.fill),stroke:'none'});},
+    stroke(){addPath({fill:'none',stroke:col(st.stroke),'stroke-width':st.lw,
+      'stroke-dasharray':(st.dash&&st.dash.length)?st.dash.join(' '):undefined,
+      'stroke-linejoin':'round','stroke-linecap':'round'});},
+    fillRect(x,y,w,h){const p=tp(x,y);cur.c.push(N('rect',{x:p[0].toFixed(2),y:p[1].toFixed(2),
+      width:(w*sx()).toFixed(2),height:(h*sy()).toFixed(2),fill:col(st.fill),stroke:'none',
+      opacity:st.ga!==1?st.ga:undefined}));},
+    strokeRect(x,y,w,h){const p=tp(x,y);cur.c.push(N('rect',{x:p[0].toFixed(2),y:p[1].toFixed(2),
+      width:(w*sx()).toFixed(2),height:(h*sy()).toFixed(2),fill:'none',stroke:col(st.stroke),
+      'stroke-width':st.lw,'stroke-dasharray':(st.dash&&st.dash.length)?st.dash.join(' '):undefined,
+      opacity:st.ga!==1?st.ga:undefined}));},
+    fillText(t,x,y){const p=tp(x,y);const fo=parseFont(st.font);let anchor='start';
+      if(st.ta==='center')anchor='middle';else if(st.ta==='right'||st.ta==='end')anchor='end';
+      let base='auto';if(st.tb==='middle')base='central';else if(st.tb==='top')base='text-before-edge';
+      else if(st.tb==='bottom')base='text-after-edge';else if(st.tb==='hanging')base='hanging';
+      const a={x:p[0].toFixed(2),y:p[1].toFixed(2),'font-family':fo.family,'font-size':fo.size,
+        'font-weight':fo.weight,fill:col(st.fill),'text-anchor':anchor,'dominant-baseline':base,
+        opacity:st.ga!==1?st.ga:undefined};
+      const nd=N('text',a);nd.t=String(t);cur.c.push(nd);},
+    strokeText(t,x,y){this.fillText(t,x,y);},
+    clip(){if(!path.length)return;cid++;const id='clip'+cid;
+      const cp=N('clipPath',{id:id});cp.c.push(N('path',{d:dstr(path)}));defs.c.push(cp);
+      const g=N('g',{'clip-path':'url(#'+id+')'});cur.c.push(g);cur=g;},
+    clearRect(){},
+    setLineDash(arr){st.dash=arr||[];},
+    translate(x,y){mul([1,0,0,1,x,y]);},
+    rotate(a){const c=Math.cos(a),s=Math.sin(a);mul([c,s,-s,c,0,0]);},
+    scale(x,y){mul([x,0,0,y,0,0]);},
+    setTransform(a,b,c,d,e,f){m=[a,b,c,d,e,f];},
+    measureText(t){const fo=parseFont(st.font);return {width:String(t).length*(parseFloat(fo.size)||10)*0.6};},
+    createLinearGradient(){return {addColorStop(){}};},
+    createRadialGradient(){return {addColorStop(){}};},
+    createPattern(){return null;},
+    drawImage(){}, getImageData(){return {data:[]};}, putImageData(){},
+    set fillStyle(v){st.fill=v;}, get fillStyle(){return st.fill;},
+    set strokeStyle(v){st.stroke=v;}, get strokeStyle(){return st.stroke;},
+    set lineWidth(v){st.lw=v;}, get lineWidth(){return st.lw;},
+    set font(v){st.font=v;}, get font(){return st.font;},
+    set textAlign(v){st.ta=v;}, get textAlign(){return st.ta;},
+    set textBaseline(v){st.tb=v;}, get textBaseline(){return st.tb;},
+    set globalAlpha(v){st.ga=v;}, get globalAlpha(){return st.ga;},
+    set lineCap(v){}, get lineCap(){return 'butt';},
+    set lineJoin(v){}, get lineJoin(){return 'miter';},
+    set lineDashOffset(v){}, get lineDashOffset(){return 0;},
+    set shadowBlur(v){}, get shadowBlur(){return 0;},
+    set shadowColor(v){}, get shadowColor(){return 'rgba(0,0,0,0)';},
+    toSvg(w,h,vx,vy){root.a={width:w,height:h,
+      viewBox:(vx||0)+' '+(vy||0)+' '+(w||0)+' '+(h||0),
+      xmlns:'http://www.w3.org/2000/svg','xmlns:xlink':'http://www.w3.org/1999/xlink'};
+      return '<?xml version="1.0" encoding="UTF-8"?>\n'+ser(root);}
+  };
+}
+function recordCanvasSVG(canvasId,crop){
+  const rec=makeSvgCtx();
+  try{
+    if(canvasId==='tlCanvas'){ const o=TL.cx; TL.cx=rec; tlDraw(); TL.cx=o; }
+    else if(canvasId==='accCanvas'){ const o=ACC.cx; ACC.cx=rec; accRender(); ACC.cx=o; }
+    else if(canvasId==='pvCanvas'){ const o=PV.cx; PV.cx=rec; pvBuild(); pvDraw(); PV.cx=o; }
+    else if(canvasId==='miniCanvas'){ const o=Mini.cx; Mini.cx=rec; miniDraw(); Mini.cx=o; }
+  }catch(e){ /* 录制失败则产出空矢量图，不阻断导出 */ }
+  const cv=document.getElementById(canvasId);
+  const dpr=window.devicePixelRatio||1;
+  let vw=Math.max(1,Math.round((cv.width/dpr)||cv.width||1));
+  let vh=Math.max(1,Math.round((cv.height/dpr)||cv.height||1));
+  let vx=0,vy=0;
+  if(crop&&crop.w>0&&crop.h>0){ vx=Math.round(crop.x/dpr); vy=Math.round(crop.y/dpr); vw=Math.max(1,Math.round(crop.w/dpr)); vh=Math.max(1,Math.round(crop.h/dpr)); }
+  return rec.toSvg(vw,vh,vx,vy);
+}
 function exportPageSvg(name){
   try{
     const root=$('app'); if(!root)return;
@@ -3397,11 +3517,19 @@ function exportPageSvg(name){
     const clone=root.cloneNode(true);
     clone.querySelectorAll('.modal.on').forEach(m=>{ if(m.parentNode)m.parentNode.removeChild(m); });
     clone.querySelectorAll('canvas').forEach(c=>{
-      const img=document.createElement('img');
-      try{img.src=c.toDataURL();}catch(e){img.src='';}
-      img.style.width=(c.clientWidth||0)+'px';img.style.height=(c.clientHeight||0)+'px';
-      img.className=c.className;img.id=c.id;
-      if(c.parentNode)c.parentNode.replaceChild(img,c);
+      try{
+        const svgStr=recordCanvasSVG(c.id);
+        const dpr=window.devicePixelRatio||1;
+        const sw=Math.max(1,Math.round((c.width/dpr)||c.width||1)), sh=Math.max(1,Math.round((c.height/dpr)||c.height||1));
+        const tmp=document.createElement('div');
+        tmp.innerHTML=svgStr.replace(/^<\?xml[^>]*\?>\s*/,'');
+        const svgEl=tmp.querySelector('svg');
+        if(svgEl){
+          svgEl.setAttribute('width',sw); svgEl.setAttribute('height',sh);
+          svgEl.style.width=sw+'px'; svgEl.style.height=sh+'px';
+          if(c.parentNode)c.parentNode.replaceChild(svgEl,c);
+        } else if(c.parentNode)c.parentNode.removeChild(c);
+      }catch(e){ if(c.parentNode)c.parentNode.removeChild(c); }
     });
     clone.style.width=w+'px';clone.style.height=h+'px';clone.style.margin='0';clone.style.transform='none';clone.style.overflow='visible';
     const html=new XMLSerializer().serializeToString(clone);
@@ -3417,19 +3545,11 @@ function exportPageSvg(name){
 function exportCanvasSvg(name,crop){
   const cv=activeCanvas();
   if(!cv){ exportPageSvg(name); return; } // 无画布的 HTML 视图回退到整页
-  if(S.pane==='access')accRender();else if(S.pane==='timeline')tlDraw();else if(S.pane==='pipeline')pvDraw();
-  let rect=null; if(crop) rect=tightCropRect(cv);
-  const W=rect?rect.w:cv.width, H=rect?rect.h:cv.height;
-  const vx=rect?rect.x:0, vy=rect?rect.y:0;
-  const data=cv.toDataURL();
-  const svg='<?xml version="1.0" encoding="UTF-8"?>\n'
-    +'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
-    +'width="'+W+'" height="'+H+'" viewBox="'+vx+' '+vy+' '+W+' '+H+'">'
-    +'<image x="0" y="0" width="'+cv.width+'" height="'+cv.height+'" '
-    +'href="'+data+'" xlink:href="'+data+'"/>'
-    +'</svg>';
+  if(S.pane==='access'){accResize();accRender();}else if(S.pane==='timeline'){tlResize();tlDraw();}else if(S.pane==='pipeline'){pvResize();pvDraw();}
+  const rect=crop?tightCropRect(cv):null;
+  const svg=recordCanvasSVG(cv.id, rect);
   dl(name+'.svg', svg, 'image/svg+xml;charset=utf-8');
-  msg('已导出'+(crop?'有效区域':'整个画布')+' SVG');
+  msg('已导出'+(crop?'有效区域':'整个画布')+' SVG（矢量）');
 }
 function exportSvg(){
   const mode=$('pngMode')?$('pngMode').value:'full';
@@ -3499,6 +3619,12 @@ function bind(){
 
   /* ---- 关于 / 开发报告 / 更新记录 ---- */
   const CHANGELOG=[
+    {v:'0.06.9',date:'2025-08-07',items:[
+      '【SVG 导出改为真矢量（缺陷修复）】原「整个画布 / 有效区域」模式把画布位图塞进 <image> 标签，放大即糊。改为 makeSvgCtx() 录制型 Canvas2D 上下文：临时替换各视图 ctx 后重跑既有绘制函数（tlDraw/accRender/pvDraw/miniDraw），把 fillRect/stroke/path/fillText 等调用录制成真正的 <rect>/<path>/<text> 图元，导出即矢量，可任意缩放不失真',
+      '【修复】exportCanvasSvg 原先对录制出的 <svg> 再用正则追加第二个 viewBox，导致 XML 校验报「Attribute viewBox redefined」而文件损坏。改为把裁剪矩形直接传入 recordCanvasSVG→toSvg，viewBox/width/height 一次性正确生成（整页/整个画布/有效区域三种范围均经 DOMParser 校验 well-formed）',
+      '【悬浮提示改为自定义气泡，消除整窗闪烁（缺陷修复）】v0.06.8 的 bindTooltips()+lazyTip() 给交互元素挂原生 title，触发操作系统原生 tooltip，鼠标移到按钮上会连带整个浏览器闪一下。改为 bindTips()：清空所有原生 title，统一用事件委托在 #app 上驱动自定义 #tip 气泡（mouseover/mousemove/mouseout），不再有原生 tooltip 闪烁。覆盖按钮/开关/输入/选项/标签页/折叠节/动态标签/事件表/统计卡等',
+      '【健壮性】导出前对每个视图显式调用对应 resize（accResize/tlResize/pvResize）再重绘，避免「刚切视图即点导出」时画布尚未完成尺寸初始化而导出极小（如 10×10）SVG 的情况'
+    ]},
     {v:'0.06.2',date:'2025-08-07',items:[
       '【对比移植+修正】冗余预取（redundant prefetch）判定：移植另一 AI 的 core.js 思路，但修正其语义缺陷',
       '原实现"只要该行此前被访问过就算冗余"无视时间窗口——一条行在十万周期前被读过早已被替换出去，那时重新预取完全正确，原口径会把正常预取大批误判成冗余',
@@ -3622,7 +3748,7 @@ function bind(){
   function renderAbout(){
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06.8</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06.9</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
@@ -3753,7 +3879,7 @@ function bind(){
 /* =======================================================================
    16. 启动
    ======================================================================= */
-tlInit();pvInit();accInit();miniInit();bind();bindTooltips();lazyTip();
+tlInit();pvInit();accInit();miniInit();bind();bindTips();
 tlResize();pvResize();accResize();tlDraw();miniMount();
 </script>
 </body>
