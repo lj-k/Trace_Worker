@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06.6</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06.7</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06.6">
+<meta name="version" content="0.06.7">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -270,7 +270,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06.6 · 作者 konglingjun">v0.06.6</span></div>
+    <span class="ver" id="verTag" title="版本 0.06.7 · 作者 konglingjun">v0.06.7</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -3170,64 +3170,97 @@ function activeCanvas(){
   if(S.pane==='timeline')return TL.cv;
   return null; // 表 / 统计 / 字典 等纯 HTML 视图无画布
 }
-/* 当前画布「有效区域」矩形（含轴刻度标签，剔除最外层空白），单位 CSS 像素 */
-function viewPlotRect(){
-  const cv=activeCanvas();
-  if(!cv)return null;
-  if(S.pane==='timeline')return {x:0,y:0,w:TL.W,h:Math.max(1,TL.H-TL.navH)};
-  if(S.pane==='pipeline')return {x:0,y:0,w:PV.W,h:PV.H};
-  if(S.pane==='access'){
-    if(ACC.view==='atime'){
-      const plotX=ACC.padL,plotW=ACC.W-ACC.padL-ACC.padR,plotY=ACC.padT,plotH=ACC.H-ACC.padT-ACC.padB;
-      const x0=Math.max(0,plotX-66), y0=Math.max(0,plotY-2);          // 保留左侧 y 轴标签
-      const x1=Math.min(ACC.W,plotX+plotW+4), y1=Math.min(ACC.H,plotY+plotH+20); // 保留底部 x 轴标签
-      return {x:x0,y:y0,w:Math.max(1,x1-x0),h:Math.max(1,y1-y0)};
+/* 有效区域（裁剪空白）：对画布逐像素求非背景内容的最小包围盒，剔除四周空白边距。
+   适用于所有 canvas 视图（atime/hot/stride/reuse/timeline/pipeline），无需逐视图硬编码。 */
+function tightCropRect(cv,margin){
+  margin=margin||3;
+  const w=cv.width,h=cv.height;
+  if(!w||!h)return null;
+  let data;
+  try{ data=cv.getContext('2d').getImageData(0,0,w,h).data; }catch(e){ return {x:0,y:0,w,h}; }
+  // 背景色 = 四角采样（accClear 全填充 / 未填充则为透明），以首角作基准
+  const at=(x,y)=>{const i=(y*w+x)*4;return [data[i],data[i+1],data[i+2],data[i+3]];};
+  const bg=at(2,2);
+  const isBg=(r,g,b,a)=> a<10 || (Math.abs(r-bg[0])<14&&Math.abs(g-bg[1])<14&&Math.abs(b-bg[2])<14);
+  let minX=w,minY=h,maxX=-1,maxY=-1;
+  for(let y=0;y<h;y++){
+    let hit=false;
+    for(let x=0;x<w;x++){
+      const i=(y*w+x)*4;
+      if(!isBg(data[i],data[i+1],data[i+2],data[i+3])){
+        if(x<minX)minX=x; if(x>maxX)maxX=x; hit=true;
+      }
     }
-    return {x:0,y:0,w:ACC.W,h:ACC.H};
+    if(hit){ if(y<minY)minY=y; if(y>maxY)maxY=y; }
   }
-  return {x:0,y:0,w:cv.clientWidth||cv.width,h:cv.clientHeight||cv.height};
+  if(maxX<0) return {x:0,y:0,w,h};
+  minX=Math.max(0,minX-margin); minY=Math.max(0,minY-margin);
+  maxX=Math.min(w-1,maxX+margin); maxY=Math.min(h-1,maxY+margin);
+  return {x:minX,y:minY,w:maxX-minX+1,h:maxY-minY+1};
 }
-/* 整页导出：用 foreignObject 把整个前端页面（#app：顶栏 + 侧栏 + 主舞台 + 底栏）快照到画布；
-   canvas 元素转成其 toDataURL 的 img 以保留绘制内容。可选 root 参数覆盖抓取目标。 */
-function exportStagePng(name,root){
+/* 整页导出（DOM→Canvas 合成）：直接遍历实时 DOM，把 #app 的版面（顶栏 / 侧栏 / 主舞台 / 底栏）
+   按其真实 getBoundingClientRect 重绘到离屏画布。不经过 foreignObject，规避 Chromium 对含
+   foreignObject 的画布施加 taint 导致 toBlob 失败的已知限制；可见的 <canvas>（仅当前激活视图）
+   以 drawImage 原样并入，保证数据可视化内容完整。 */
+function exportPagePng(name){
   try{
-    const rootEl=root||$('app');if(!rootEl)return;
-    const r=rootEl.getBoundingClientRect();
+    const root=$('app'); if(!root)return;
+    const base=root.getBoundingClientRect();
     const scale=Math.min(2,window.devicePixelRatio||1);
-    const w=Math.max(1,Math.ceil(r.width)),h=Math.max(1,Math.ceil(r.height));
-    let css='';
-    for(const sh of document.styleSheets){try{for(const rule of sh.cssRules)css+=rule.cssText+'\n';}catch(e){}}
-    const clone=rootEl.cloneNode(true);
-    // 整页模式不截取弹窗（关于/开发报告），避免遮挡主体内容
-    clone.querySelectorAll('.modal.on').forEach(m=>{ if(m.parentNode)m.parentNode.removeChild(m); });
-    clone.querySelectorAll('canvas').forEach(c=>{
-      const img=document.createElement('img');
-      try{img.src=c.toDataURL();}catch(e){img.src='';}
-      img.style.width=(c.clientWidth||0)+'px';img.style.height=(c.clientHeight||0)+'px';
-      img.className=c.className;img.id=c.id;
-      if(c.parentNode)c.parentNode.replaceChild(img,c);
-    });
-    clone.style.width=r.width+'px';clone.style.height=r.height+'px';clone.style.margin='0';
-    clone.style.transform='none';clone.style.overflow='visible';
-    const html=new XMLSerializer().serializeToString(clone);
-    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'">'
-      +'<foreignObject width="100%" height="100%">'
-      +'<div xmlns="http://www.w3.org/1999/xhtml"><style>'+css+'</style>'+html+'</div>'
-      +'</foreignObject></svg>';
-    const svgBlob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
-    const url=URL.createObjectURL(svgBlob);
-    const img=new Image();
-    img.onload=()=>{
-      const off=document.createElement('canvas');
-      off.width=Math.ceil(w*scale);off.height=Math.ceil(h*scale);
-      const ctx=off.getContext('2d');ctx.scale(scale,scale);ctx.drawImage(img,0,0);
-      URL.revokeObjectURL(url);
-      try{ off.toBlob(b=>{ if(b)dlBlob(b,name+'.png'); else { msg('整页导出受限，改用当前画布'); exportCanvasOnly(name); } },'image/png'); }
-      catch(e){ msg('整页导出受限（foreignObject 跨域限制），改用当前画布'); exportCanvasOnly(name); }
-      msg('已导出整页截图（含顶栏 / 侧栏 / 主舞台 / 底栏）');
-    };
-    img.onerror=()=>{ URL.revokeObjectURL(url); msg('整页导出失败，改用当前画布'); exportCanvasOnly(name); };
-    img.src=url;
+    const W=Math.max(1,Math.ceil(base.width)),H=Math.max(1,Math.ceil(base.height));
+    const off=document.createElement('canvas');
+    off.width=Math.ceil(W*scale); off.height=Math.ceil(H*scale);
+    const g=off.getContext('2d');
+    const pageBg=getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()||'#0e1116';
+    g.fillStyle=pageBg; g.fillRect(0,0,off.width,off.height);
+    const skip=new Set(['loader','tip']);
+    const hasText=s=>!!s&&s.replace(/\s+/g,'').length>0;
+    function paint(el){
+      if(el.nodeType!==1)return;
+      if(skip.has(el.id))return;
+      const cs=getComputedStyle(el);
+      if(cs.display==='none'||cs.visibility==='hidden')return;
+      const tag=el.tagName.toLowerCase();
+      if(tag==='script'||tag==='style'||tag==='link'||tag==='meta')return;
+      const r=el.getBoundingClientRect();
+      const x=(r.left-base.left)*scale, y=(r.top-base.top)*scale, w=r.width*scale, h=r.height*scale;
+      if(w<=0||h<=0)return;
+      if(tag==='canvas'){ try{ g.drawImage(el,0,0,el.width,el.height,x,y,w,h); }catch(e){} return; }
+      const bg=cs.backgroundColor;
+      if(bg&&bg!=='transparent'&&bg!=='rgba(0, 0, 0, 0)'){ g.fillStyle=bg; g.fillRect(x,y,w,h); }
+      const bw=parseFloat(cs.borderTopWidth)||0;
+      if(bw>0&&(cs.borderStyle||'').indexOf('none')<0){
+        g.strokeStyle=cs.borderTopColor||'#555'; g.lineWidth=Math.max(1,bw*scale);
+        g.strokeRect(x+bw*scale/2,y+bw*scale/2,w-bw*scale,h-bw*scale);
+      }
+      let hasVisibleChild=false;
+      for(const c of el.children){ if(c.nodeType===1&&getComputedStyle(c).display!=='none'){hasVisibleChild=true;break;} }
+      if(!hasVisibleChild){
+        let txt='';
+        if(tag==='input'||tag==='textarea') txt=el.value||el.placeholder||'';
+        else if(tag==='select') txt=el.value||'';
+        else txt=(el.textContent||'').replace(/\s+/g,' ').trim();
+        if(hasText(txt)){
+          g.fillStyle=cs.color||'#ddd';
+          g.font=(cs.fontWeight&&cs.fontWeight!=='normal'?' '+cs.fontWeight:'')+' '+(cs.fontSize||'13px')+' '+(cs.fontFamily||'sans-serif');
+          g.textBaseline='middle'; g.textAlign='left';
+          const padL=parseFloat(cs.paddingLeft)||0, padR=parseFloat(cs.paddingRight)||0;
+          const tx=x+padL*scale+3*scale, ty=y+h/2;
+          const maxW=w-(padL+padR)*scale-6*scale;
+          g.save(); g.beginPath(); g.rect(x,y,w,h); g.clip();
+          let s=txt;
+          while(s.length>1&&g.measureText(s).width>maxW) s=s.slice(0,-1);
+          if(s.length<txt.length) s=s.slice(0,-1)+'…';
+          g.fillText(s,tx,ty);
+          g.restore();
+        }
+      }
+      if(tag==='select')return; // 下拉框不再递归其 option 子节点
+      for(const c of el.children) paint(c);
+    }
+    paint(root);
+    off.toBlob(b=>{ if(b)dlBlob(b,name+'.png'); else msg('整页导出失败'); },'image/png');
+    msg('已导出整页截图（含顶栏 / 侧栏 / 主舞台 / 底栏）');
   }catch(e){ msg('整页导出失败：'+e.message); }
 }
 function exportCanvasOnly(name){
@@ -3239,9 +3272,9 @@ function exportPng(){
   const mode=$('pngMode')?$('pngMode').value:'full';
   const base=(S.fileName||'trace').replace(/\.\w+$/,'');
   const name=base+'-'+S.pane+(S.pane==='access'?('-'+ACC.view):'')+'-'+mode;
-  if(mode==='page'){exportStagePng(name);return;}
+  if(mode==='page'){ exportPagePng(name); return; }
   const cv=activeCanvas();
-  if(!cv){exportStagePng(name);return;} // HTML 视图无画布→整页
+  if(!cv){ exportPagePng(name); return; } // HTML 视图（表/统计/字典）无画布 → 整页合成
   // 导出前重绘当前视图，确保画布为最新内容（避免与 rAF 重排竞态）
   if(S.pane==='access')accRender();else if(S.pane==='timeline')tlDraw();else if(S.pane==='pipeline')pvDraw();
   if(mode==='full'){
@@ -3249,13 +3282,11 @@ function exportPng(){
     msg('已导出视图截图（全画布）');
     return;
   }
-  // crop：裁剪到有效区域（带标尺），去除最外层空白
-  const rect=viewPlotRect();
-  const dpr=cv.width/Math.max(1,cv.clientWidth||1);
-  const cw=Math.max(1,Math.round(rect.w*dpr)),ch=Math.max(1,Math.round(rect.h*dpr));
-  const off=document.createElement('canvas');off.width=cw;off.height=ch;
-  const octx=off.getContext('2d');
-  octx.drawImage(cv,rect.x*dpr,rect.y*dpr,rect.w*dpr,rect.h*dpr,0,0,cw,ch);
+  // crop：裁剪到有效区域（实际内容包围盒，带标尺刻度），去除四周空白
+  const rect=tightCropRect(cv);
+  if(!rect){ cv.toBlob(b=>{ if(b)dlBlob(b,name+'.png'); else msg('导出失败'); },'image/png'); return; }
+  const off=document.createElement('canvas'); off.width=rect.w; off.height=rect.h;
+  off.getContext('2d').drawImage(cv,rect.x,rect.y,rect.w,rect.h,0,0,rect.w,rect.h);
   off.toBlob(b=>{ if(b)dlBlob(b,name+'.png'); else msg('导出失败'); },'image/png');
   msg('已导出视图截图（有效区域）');
 }
@@ -3327,6 +3358,11 @@ function bind(){
       '统计页新增「冗余预取」概览卡 + 详情小节：驻留窗口直方图（按距上次访问分桶）+ 驻留窗口敏感性表（256/1024/4096/8192/32768/不限），当前窗口行高亮标记',
       '侧栏「关联窗口」新增「冗余预取判定窗口（缓存驻留）」输入框，可调整后点「重算事务链路」即时重算',
       '【预防性修复】将所有 Math.max(...arr)/Math.min(...arr) 展开调用改为循环实现的 maxOf()/minOf() 助手：数组超过约 12 万个元素时 spread 会触发 RangeError 栈溢出（另一 AI 的 core.js 文档也提及此坑却仍在 core.js:339 提交了该写法）'
+    ]},
+    {v:'0.06.7',date:'2025-08-07',items:[
+      '【PNG 整页导出修复（缺陷）】原 foreignObject 方案在 Chromium 下会污染画布（toBlob 抛 SecurityError）导致静默回退到单画布——"整页"实际只导出当前画布。改为 DOM→Canvas 合成器：直接遍历实时 #app，按其真实 getBoundingClientRect 重绘顶栏/侧栏/主舞台/底栏，可见 <canvas> 以 drawImage 原样并入，彻底规避 taint，真正导出整个前端页面',
+      '【PNG 有效区域去空白（缺陷）】原 viewPlotRect 对 hot/stride/reuse/timeline/pipeline 直接返回整张画布（含大量上下留白），atime 也保留固定边距。改为 tightCropRect：对画布逐像素求非背景内容的最小包围盒，自动剔除四周空白，所有视图均只导出带标尺刻度的实际内容',
+      '新增 test_v066.mjs（重写为 v0.06.7 验证）：整页导出 PNG 尺寸≈整页（含顶栏+侧栏+底栏，明显高于单画布）、有效区域裁剪后空白被剔除'
     ]},
     {v:'0.06.6',date:'2025-08-07',items:[
       '【PNG 整页导出含整个前端页面】exportStagePng 抓取目标从 #stage 改为 #app（顶栏 tabs/按钮 + 侧栏过滤 + 主舞台 + 底栏），"整页"模式现包含完整前端；移除弹窗避免遮挡主体',
@@ -3434,7 +3470,7 @@ function bind(){
   function renderAbout(){
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06.6</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06.7</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
