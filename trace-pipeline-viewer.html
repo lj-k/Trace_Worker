@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06.5</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06.6</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06.5">
+<meta name="version" content="0.06.6">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -270,7 +270,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06.5 · 作者 konglingjun">v0.06.5</span></div>
+    <span class="ver" id="verTag" title="版本 0.06.6 · 作者 konglingjun">v0.06.6</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -2808,12 +2808,7 @@ function accDrawAtime(C,c){
   const y0=ACC.y0,y1=ACC.y1,spanY=(y1-y0)||1,rowH=nA>0?plotH/nA:plotH;
   const Yaddl=a=>plotY+(a-y0)/spanY*plotH;
   const Yrow=k=>plotY+(k+0.5-y0)/spanY*plotH;
-  // y 网格（数值地址模式）
-  if(ACC.axis!=='row'){
-    cx.strokeStyle=C.line;cx.globalAlpha=.5;cx.beginPath();
-    for(let q=0;q<=4;q++){const y=plotY+plotH*q/4;cx.moveTo(plotX,y+.5);cx.lineTo(plotX+plotW,y+.5);}
-    cx.stroke();cx.globalAlpha=1;
-  }
+  // y 轴网格线改由下方自适应刻度循环统一绘制（数值地址模式），避免与标签错位
   // x 轴刻度
   let step=Math.pow(10,Math.floor(Math.log10(spanT/plotW*90)));
   for(const m of [1,2,5,10]){if(step*m*plotW/spanT>=90){step=step*m;break;}}
@@ -2823,13 +2818,29 @@ function accDrawAtime(C,c){
     cx.strokeStyle=C.line;cx.globalAlpha=.4;cx.beginPath();cx.moveTo(x+.5,plotY);cx.lineTo(x+.5,plotY+plotH);cx.stroke();cx.globalAlpha=1;
     cx.fillText(fmt(Math.round(cc)),x,plotY+plotH+14);
   }
-  // y 轴刻度
+  // y 轴刻度（自适应步长）：保证相邻标签垂直间距 ≥ 文本高度，纵轴缩小时自动合并/跳过标签避免堆积重叠
   cx.textAlign='right';cx.fillStyle=C.fg3;
+  const yPitch=16; // 标签最小垂直间距(px)，小于此值则认为相邻标签会重叠
   if(ACC.axis!=='row'){
-    for(let q=0;q<=4;q++){const a=y1-(y1-y0)*q/4;cx.fillText('0x'+(a>>>0).toString(16),plotX-6,plotY+plotH*q/4+3);}
+    // 数值地址模式：由最小像素间距反推「整齐」地址步长（1/2/5×10^n），并据此画网格线+标签
+    const rawStep=spanY*yPitch/plotH;                  // 至少 yPitch 像素对应的地址跨度
+    let stepA=Math.max(1,Math.ceil(rawStep||1));       // 步长至少为 1（地址为整数）
+    const p10=Math.pow(10,Math.floor(Math.log10(stepA)));
+    for(const m of [1,2,5,10]){ if(p10*m>=stepA){ stepA=p10*m; break; } }
+    cx.strokeStyle=C.line;cx.globalAlpha=.4;cx.beginPath();
+    for(let a=Math.ceil(y0/stepA)*stepA;a<=y1;a+=stepA){
+      const yy=Yaddl(a);if(yy<plotY-3||yy>plotY+plotH+3)continue;
+      cx.moveTo(plotX,yy+.5);cx.lineTo(plotX+plotW,yy+.5);
+    }
+    cx.stroke();cx.globalAlpha=1;
+    for(let a=Math.ceil(y0/stepA)*stepA;a<=y1;a+=stepA){
+      const yy=Yaddl(a);if(yy<plotY-3||yy>plotY+plotH+3)continue;
+      cx.fillText('0x'+(a>>>0).toString(16),plotX-6,yy+3);
+    }
   }else{
-    const stepR=Math.max(1,Math.floor((y1-y0)/14));
-    for(let k=Math.ceil(y0);k<y1;k+=stepR){ if(k<0||k>=nA)continue; cx.fillText('0x'+addrs[k],plotX-6,plotY+(k+0.5-y0)/spanY*plotH+3);}
+    // 行模式：由最小像素间距反推行步长，自动跳过多余标签行（spanY 越大/画布越矮 → 步长越大）
+    const stepR=Math.max(1,Math.ceil(spanY*yPitch/plotH));
+    for(let k=Math.ceil(y0/stepR)*stepR;k<y1;k+=stepR){ if(k<0||k>=nA)continue; cx.fillText('0x'+addrs[k],plotX-6,plotY+(k+0.5-y0)/spanY*plotH+3);}
   }
   // 数据点
   ACC.points=[];const grid=new Map();const cell=9;
@@ -3176,15 +3187,19 @@ function viewPlotRect(){
   }
   return {x:0,y:0,w:cv.clientWidth||cv.width,h:cv.clientHeight||cv.height};
 }
-/* 整页（主舞台）导出：用 foreignObject 把 #stage 快照到画布；canvas 元素转成其 toDataURL 的 img 以保留绘制内容 */
-function exportStagePng(name){
+/* 整页导出：用 foreignObject 把整个前端页面（#app：顶栏 + 侧栏 + 主舞台 + 底栏）快照到画布；
+   canvas 元素转成其 toDataURL 的 img 以保留绘制内容。可选 root 参数覆盖抓取目标。 */
+function exportStagePng(name,root){
   try{
-    const stage=$('stage');const r=stage.getBoundingClientRect();
+    const rootEl=root||$('app');if(!rootEl)return;
+    const r=rootEl.getBoundingClientRect();
     const scale=Math.min(2,window.devicePixelRatio||1);
     const w=Math.max(1,Math.ceil(r.width)),h=Math.max(1,Math.ceil(r.height));
     let css='';
     for(const sh of document.styleSheets){try{for(const rule of sh.cssRules)css+=rule.cssText+'\n';}catch(e){}}
-    const clone=stage.cloneNode(true);
+    const clone=rootEl.cloneNode(true);
+    // 整页模式不截取弹窗（关于/开发报告），避免遮挡主体内容
+    clone.querySelectorAll('.modal.on').forEach(m=>{ if(m.parentNode)m.parentNode.removeChild(m); });
     clone.querySelectorAll('canvas').forEach(c=>{
       const img=document.createElement('img');
       try{img.src=c.toDataURL();}catch(e){img.src='';}
@@ -3193,6 +3208,7 @@ function exportStagePng(name){
       if(c.parentNode)c.parentNode.replaceChild(img,c);
     });
     clone.style.width=r.width+'px';clone.style.height=r.height+'px';clone.style.margin='0';
+    clone.style.transform='none';clone.style.overflow='visible';
     const html=new XMLSerializer().serializeToString(clone);
     const svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'">'
       +'<foreignObject width="100%" height="100%">'
@@ -3208,7 +3224,7 @@ function exportStagePng(name){
       URL.revokeObjectURL(url);
       try{ off.toBlob(b=>{ if(b)dlBlob(b,name+'.png'); else { msg('整页导出受限，改用当前画布'); exportCanvasOnly(name); } },'image/png'); }
       catch(e){ msg('整页导出受限（foreignObject 跨域限制），改用当前画布'); exportCanvasOnly(name); }
-      msg('已导出整页截图');
+      msg('已导出整页截图（含顶栏 / 侧栏 / 主舞台 / 底栏）');
     };
     img.onerror=()=>{ URL.revokeObjectURL(url); msg('整页导出失败，改用当前画布'); exportCanvasOnly(name); };
     img.src=url;
@@ -3312,6 +3328,11 @@ function bind(){
       '侧栏「关联窗口」新增「冗余预取判定窗口（缓存驻留）」输入框，可调整后点「重算事务链路」即时重算',
       '【预防性修复】将所有 Math.max(...arr)/Math.min(...arr) 展开调用改为循环实现的 maxOf()/minOf() 助手：数组超过约 12 万个元素时 spread 会触发 RangeError 栈溢出（另一 AI 的 core.js 文档也提及此坑却仍在 core.js:339 提交了该写法）'
     ]},
+    {v:'0.06.6',date:'2025-08-07',items:[
+      '【PNG 整页导出含整个前端页面】exportStagePng 抓取目标从 #stage 改为 #app（顶栏 tabs/按钮 + 侧栏过滤 + 主舞台 + 底栏），"整页"模式现包含完整前端；移除弹窗避免遮挡主体',
+      '【纵轴标签自适应合并】地址-时间视图 y 轴刻度改为按最小像素间距(16px)反推步长：数值地址模式选 1/2/5×10ⁿ 整齐步长并据此画网格线+标签；行模式步长随范围/画布高度自适应放大，缩小时自动跳过重叠标签，支持进一步缩小而不堆积',
+      '新增 test_v066.mjs：锁定整页导出含顶栏/侧栏、纵轴标签不重叠（短画布+大范围场景）'
+    ]},
     {v:'0.06.5',date:'2025-08-07',items:[
       '【访存分析标签左移】标签顺序调整为 时序泳道 → 访存分析 → 流水线事务 → 事件表 → 统计分析 → 语义字典',
       '【时序泳道拖拽修复】tlMove 读取了未定义的 TL.drag.my0（tlDown 仅设了 my）导致 TL.vScroll=NaN、图形消失；改为读取 TL.drag.my（双击复位）',
@@ -3413,7 +3434,7 @@ function bind(){
   function renderAbout(){
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06.5</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06.6</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
