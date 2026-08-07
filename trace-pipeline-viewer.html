@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06.4</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06.5</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06.4">
+<meta name="version" content="0.06.5">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -26,6 +26,7 @@
   --acc:#4ea1ff; --acc2:#35c4dc;
   --ok:#52d38a; --warn:#f0a03c; --err:#ff5f6d;
   --rel:#ff4d9d;                      /* 关联高亮（同PC/同ADDL连线） */
+  --cross:#5ec8ff;                   /* 十字对齐虚线 */
   --accSoft:rgba(78,161,255,.14); --accLine:rgba(78,161,255,.38);
   --rowHi:rgba(78,161,255,.17);     /* 选中行底色 */
   --markHi:#ffffff;                 /* 画布上的强调描边 */
@@ -44,6 +45,7 @@ html[data-theme="light"]{
   --acc:#0b6cd4; --acc2:#0a7f96;
   --ok:#0f7a48; --warn:#a35c07; --err:#c8232f;
   --rel:#d61f7a;
+  --cross:#1f7fd6;                   /* 十字对齐虚线 */
   --accSoft:rgba(11,108,212,.10); --accLine:rgba(11,108,212,.34);
   --rowHi:rgba(11,108,212,.13);
   --markHi:#0b1420;
@@ -60,6 +62,7 @@ html[data-theme="sepia"]{
   --acc:#a8611b; --acc2:#7a6320;
   --ok:#4f7a25; --warn:#b0700c; --err:#b3392b;
   --rel:#b5347a;
+  --cross:#1f7fd6;                   /* 十字对齐虚线 */
   --accSoft:rgba(168,97,27,.12); --accLine:rgba(168,97,27,.36);
   --rowHi:rgba(168,97,27,.16);
   --markHi:#3a2f21;
@@ -267,22 +270,27 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06.3 · 作者 konglingjun">v0.06.4</span></div>
+    <span class="ver" id="verTag" title="版本 0.06.5 · 作者 konglingjun">v0.06.5</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
   <div class="hsep"></div>
   <div class="tabs" id="tabs">
     <div class="tab on" data-p="timeline">时序泳道</div>
+    <div class="tab" data-p="access">访存分析</div>
     <div class="tab" data-p="pipeline">流水线事务</div>
     <div class="tab" data-p="table">事件表</div>
     <div class="tab" data-p="stats">统计分析</div>
-    <div class="tab" data-p="access">访存分析</div>
     <div class="tab" data-p="dict">语义字典</div>
   </div>
   <div class="spacer"></div>
   <button class="btn sm" id="btnCsv" title="导出当前过滤结果为 CSV">⬇ CSV</button>
-  <button class="btn sm" id="btnPng" title="导出当前视图为 PNG">⬇ PNG</button>
+  <select class="inp sm" id="pngMode" title="PNG 导出范围：全画布 / 有效区域(带标尺) / 整页">
+    <option value="full">全画布</option>
+    <option value="crop">有效区域</option>
+    <option value="page">整页</option>
+  </select>
+  <button class="btn sm" id="btnPng" title="导出当前视图为 PNG（范围见左侧下拉）">⬇ PNG</button>
   <button class="btn sm" id="btnTheme" title="切换主题（深色/浅色/米色）">◐</button>
   <button class="btn sm" id="btnMini" title="时间轴缩略图位置：上方 / 下方 / 关闭">🗺↓</button>
   <button class="btn sm" id="btnAbout" title="关于本工具 / 开发报告 / 更新记录">ⓘ</button>
@@ -293,7 +301,7 @@ table.st td.num{text-align:right}
   <div class="modalbox">
     <div class="modalhead">
       <span>关于 · 开发报告与更新记录</span>
-      <button class="btn sm" id="aboutClose">✕</button>
+      <button class="btn sm" id="aboutClose" title="关闭弹窗">✕</button>
     </div>
     <div class="modalbody" id="aboutBody"></div>
   </div>
@@ -333,7 +341,7 @@ table.st td.num{text-align:right}
       <div class="secbody">
         <div class="field"><label>起始周期</label><input class="inp" id="fT0" placeholder="0"></div>
         <div class="field"><label>结束周期</label><input class="inp" id="fT1" placeholder="max"></div>
-        <button class="btn sm" id="btnFitWin" style="width:100%">应用并缩放到该窗口</button>
+        <button class="btn sm" id="btnFitWin" style="width:100%" title="按上方起始/结束周期过滤，并缩放到该时间窗口">应用并缩放到该窗口</button>
       </div>
     </div>
     <div class="sec closed">
@@ -349,7 +357,7 @@ table.st td.num{text-align:right}
         <div class="field"><label>Store → AW 窗口</label><input class="inp" id="wAw" value="500"></div>
         <div class="field"><label>缓存行分段间隔</label><input class="inp" id="wGap" value="2000"></div>
         <div class="field"><label>冗余预取判定窗口（缓存驻留）</label><input class="inp" id="wResid" value="8192"></div>
-        <button class="btn primary sm" id="btnWin" style="width:100%">重算事务链路</button>
+        <button class="btn primary sm" id="btnWin" style="width:100%" title="按当前关联窗口重新计算事务（Load/预取/Store）链路与统计">重算事务链路</button>
       </div>
     </div>
     <div class="sec">
@@ -417,7 +425,7 @@ table.st td.num{text-align:right}
         <div class="g" id="pvMergeWrap" style="display:none"><label class="sw" title="将该缓存行的所有事件合并到同一行显示"><input type="checkbox" id="pvMerge"> 同 ADDL 合并成一行</label></div>
         <div class="hsep"></div>
         <div class="g">事务数 <span class="chip" id="pvCount">—</span></div>
-        <div class="g">行高 <button class="btn sm" id="pvRowDn">－</button><button class="btn sm" id="pvRowUp">＋</button></div>
+        <div class="g">行高 <button class="btn sm" id="pvRowDn" title="减小事务行高">－</button><button class="btn sm" id="pvRowUp" title="增大事务行高">＋</button></div>
         <div class="spacer"></div>
         <div class="g" id="pvLegend" style="display:flex;gap:8px"></div>
       </div>
@@ -462,8 +470,8 @@ table.st td.num{text-align:right}
           </select>
         </div>
         <div class="g" id="accAxisWrap"><label class="sw" title="每个不同缓存行占一行，点的水平位置即访问时刻"><input type="checkbox" id="accAxis"> 地址轴按行号</label></div>
-        <div class="g" id="accPcWrap"><label class="sw" title="用细线连接同一 PC 的连续访问；选中事件后高亮其 PC 轨迹"><input type="checkbox" id="pcTraj" checked> 同PC轨迹</label>
-          <label class="sw" title="用方框框住选中事件所属 PC 的其它访问"><input type="checkbox" id="pcBox"> 同PC方框</label></div>
+        <div class="g" id="accPcWrap"><label class="sw" title="用细线连接同一 PC 的连续访问（需左侧「关联高亮」设为同PC）；选中事件后高亮其 PC 轨迹"><input type="checkbox" id="pcTraj" checked> 同PC轨迹</label>
+          <label class="sw" title="用方框框住选中事件所属 PC 的其它访问（需左侧「关联高亮」设为同PC）"><input type="checkbox" id="pcBox"> 同PC方框</label></div>
         <div class="g" id="accKWrap">Top-N <input class="inp" id="accK" value="40" style="width:54px;padding:2px 5px"></div>
         <div class="hsep"></div>
         <div class="g">事件 <span class="chip" id="accEv">—</span></div>
@@ -479,7 +487,7 @@ table.st td.num{text-align:right}
 
     <!-- 详情抽屉 -->
     <div id="detail">
-      <div class="dh"><h4 id="dTitle">事件详情</h4><button class="btn sm" id="dClose">✕</button></div>
+      <div class="dh"><h4 id="dTitle">事件详情</h4><button class="btn sm" id="dClose" title="关闭详情面板（Esc 等同）">✕</button></div>
       <div class="db" id="dBody"></div>
     </div>
 
@@ -491,8 +499,8 @@ table.st td.num{text-align:right}
         纯前端解析，数据不出本机，支持十万行级 trace<br>
         <b style="color:var(--rel)">若按钮点不动（预览/沙箱拦截文件对话框），请用下方"粘贴 Trace 文本"加载</b></p>
         <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-          <button class="btn primary" id="btnPick">选择 Trace 文件</button>
-          <button class="btn" id="btnFolder">选择 Trace 文件夹</button>
+          <button class="btn primary" id="btnPick" title="通过系统文件选择器加载单个 Trace 文件">选择 Trace 文件</button>
+          <button class="btn" id="btnFolder" title="选择整个文件夹，自动挑首个 trace 文件加载">选择 Trace 文件夹</button>
         </div>
         <input type="file" id="filePick" accept=".txt,.log,.trace,.csv" class="hideinput">
         <input type="file" id="folderPick" webkitdirectory directory multiple class="hideinput">
@@ -500,8 +508,8 @@ table.st td.num{text-align:right}
           <div class="pbhead">若上方按钮在预览 / 沙箱环境下点不动（原生文件对话框被拦截），请在此<b>粘贴 Trace 文本</b>加载：</div>
           <textarea id="pasteArea" class="inp" placeholder="将 trace 文本（Ctrl+V / 右键粘贴）粘贴到此处，粘贴后自动解析…"></textarea>
           <div style="display:flex;gap:8px;justify-content:center;margin-top:8px">
-            <button class="btn" id="btnPasteLoad">解析粘贴内容</button>
-            <button class="btn ghost" id="btnPasteClear">清空</button>
+            <button class="btn" id="btnPasteLoad" title="解析文本框中的 Trace 并加载">解析粘贴内容</button>
+            <button class="btn ghost" id="btnPasteClear" title="清空粘贴文本框">清空</button>
           </div>
         </div>
         <div class="fmt">支持格式（分号分隔的键值记录，自动发现事件类型与字段）：
@@ -1032,7 +1040,7 @@ function palette(css){
     line:g('--line'),line2:g('--line2'),
     fg:g('--fg'),fg2:g('--fg2'),fg3:g('--fg3'),
     acc:g('--acc'),acc2:g('--acc2'),ok:g('--ok'),warn:g('--warn'),err:g('--err'),
-    rel:g('--rel'),
+    rel:g('--rel'),cross:g('--cross'),
     rowHi:g('--rowHi'),markHi:g('--markHi'),navFill:g('--navFill'),onBar:g('--onBar')};
 }
 const REL_MAX=400;   // 关联连线/高亮点的绘制上限，避免极端缩放（超高频 PC/缓存行）下重绘卡顿
@@ -1120,6 +1128,11 @@ function tlFocus(cyc,span){
 }
 function tlWheel(e){
   e.preventDefault();
+  // 横向滚动（触控板左右滑 / 横向滚轮）：按 deltaX 平移时间窗
+  if(!e.shiftKey && Math.abs(e.deltaX)>Math.abs(e.deltaY) && Math.abs(e.deltaX)>0){
+    const span=TL.t1-TL.t0;
+    TL.t0+=e.deltaX/TL.W*span;TL.t1+=e.deltaX/TL.W*span;tlDraw();return;
+  }
   const r=TL.cv.getBoundingClientRect();
   if(e.shiftKey){ // 缩放纵轴（泳道高度），以光标处内容为锚
     const f=e.deltaY>0?1/1.18:1.18;
@@ -1149,7 +1162,7 @@ function tlMove(e){
       const w=TL.W-TL.padL-TL.padR;
       const d=(TL.drag.x0-x)/w*(TL.drag.t1-TL.drag.t0);
       TL.t0=TL.drag.t0+d;TL.t1=TL.drag.t1+d;
-      TL.vScroll=Math.max(0,TL.drag.vScroll0+(e.clientY-TL.drag.my0));tlDraw();
+      TL.vScroll=Math.max(0,TL.drag.vScroll0+(e.clientY-TL.drag.my));tlDraw();
     }else if(TL.drag.mode==='sel'){TL.drag.x1=x;tlDraw();}
     else if(TL.drag.mode==='nav'){
       const c=S.minCyc+(x/TL.W)*(S.maxCyc-S.minCyc);
@@ -1435,6 +1448,11 @@ function pvInit(){
   new ResizeObserver(()=>{pvResize();pvDraw();}).observe($('pvWrap'));
   PV.cv.addEventListener('wheel',e=>{
     e.preventDefault();
+    // 横向滚动（触控板/横向滚轮）：平移事务时间窗
+    if(!e.shiftKey && !e.ctrlKey && !e.metaKey && Math.abs(e.deltaX)>Math.abs(e.deltaY) && Math.abs(e.deltaX)>0){
+      const span=PV.t1-PV.t0,w=PV.W-PV.padL-PV.padR;
+      const d=e.deltaX/w*span;PV.t0+=d;PV.t1+=d;pvDraw();return;
+    }
     if(e.ctrlKey||e.metaKey){ // 缩放时间轴（X）
       const r=PV.cv.getBoundingClientRect();
       const x=e.clientX-r.left;
@@ -2017,7 +2035,7 @@ function statsRender(){
     const xmx=xEnts[0][1];
     for(const [k,c] of xEnts)h+=barRow('<span style="color:#ff5f6d">'+k+'</span>',c,xmx,pct(c,n));
     h+='</table>'
-      +'<button class="btn" id="btnGotoX" style="margin-top:10px">→ 跳转到首个 x 态事件（周期 '
+      +'<button class="btn" id="btnGotoX" style="margin-top:10px" title="聚焦并选中第一个含未定义态（x/z）的事件">→ 跳转到首个 x 态事件（周期 '
       +fmt(raw[xEvt[0]].cyc)+' · 源文件行 '+raw[xEvt[0]].ln+'）</button>'
       +'</div>';
   }
@@ -2290,9 +2308,9 @@ function dictRender(){
     +'其中位域含义（如 <code>L2C_CMP.TYPE</code>、<code>REQS</code>）需要对照你的 RTL 编码确认。'
     +'在这里改好的标签会保存在浏览器本地，下次打开自动生效，也可以导出成 JSON 在团队里共享。</div>';
   h+='<div style="display:flex;gap:8px;margin-bottom:14px">'
-    +'<button class="btn" id="dExp">⬇ 导出字典 JSON</button>'
-    +'<button class="btn" id="dImp">⬆ 导入字典 JSON</button>'
-    +'<button class="btn" id="dRst">↺ 恢复内置默认</button>'
+    +'<button class="btn" id="dExp" title="导出当前字段/取值标签字典为 JSON">⬇ 导出字典 JSON</button>'
+    +'<button class="btn" id="dImp" title="从 JSON 导入字段/取值标签字典">⬆ 导入字典 JSON</button>'
+    +'<button class="btn" id="dRst" title="恢复工具内置的默认字典">↺ 恢复内置默认</button>'
     +'<input type="file" id="dFile" accept=".json" style="display:none">'
     +'</div>';
 
@@ -2318,7 +2336,7 @@ function dictRender(){
   h+='<div class="panel"><h4>取值标签（事件类型.字段 → 取值）</h4>'
     +'<div class="hint">为具体取值加中文说明，会显示在提示气泡、详情面板和统计页里。格式：一行一条 <code>TAG.FIELD.VALUE = 说明</code></div>'
     +'<textarea class="inp" id="dVals" style="min-height:170px;font-family:var(--mono)"></textarea>'
-    +'<button class="btn primary sm" id="dSaveVals" style="margin-top:8px">保存取值标签</button></div>';
+    +'<button class="btn primary sm" id="dSaveVals" style="margin-top:8px" title="保存取值标签修改到浏览器本地">保存取值标签</button></div>';
 
   $('dictBody').innerHTML=h;
 
@@ -2572,6 +2590,12 @@ function accInit(){
   ACC.cv.addEventListener('wheel',e=>{
     if(ACC.view!=='atime')return;
     e.preventDefault();
+    // 横向滚动（触控板/横向滚轮）：平移时间窗
+    if(!e.shiftKey && Math.abs(e.deltaX)>Math.abs(e.deltaY) && Math.abs(e.deltaX)>0){
+      const w=ACC.W-ACC.padL-ACC.padR;if(w<=0)return;
+      const span=ACC.t1-ACC.t0;
+      const d=e.deltaX/w*span;ACC.t0+=d;ACC.t1+=d;accRender();return;
+    }
     const r=ACC.cv.getBoundingClientRect();
     if(e.shiftKey){ // 缩放纵轴（地址 / 缓存行）到光标 Y
       if(!ACC.cache)return;
@@ -2597,14 +2621,23 @@ function accInit(){
   ACC.cv.addEventListener('mousedown',e=>{
     if(ACC.view!=='atime')return;
     const r=ACC.cv.getBoundingClientRect();
-    ACC.drag={x:e.clientX-r.left,t0:ACC.t0,t1:ACC.t1};
+    const x=e.clientX-r.left,y=e.clientY-r.top;
+    // 初始化纵轴范围：自动拟合（NaN）态下无法直接平移，先落到数据范围
+    if(!(isFinite(ACC.y0)&&isFinite(ACC.y1)&&ACC.y1>ACC.y0)&&ACC.cache){
+      if(ACC.axis==='row'){ACC.y0=0;ACC.y1=ACC.cache.byAddl.size;}
+      else{ACC.y0=ACC.cache.minA;ACC.y1=ACC.cache.maxA;}
+    }
+    ACC.drag={x,y,t0:ACC.t0,t1:ACC.t1,y0:ACC.y0,y1:ACC.y1};
   });
   window.addEventListener('mousemove',e=>{
     if(ACC.drag){
       const r=ACC.cv.getBoundingClientRect();
-      const w=ACC.W-ACC.padL-ACC.padR;
-      const d=(ACC.drag.x-(e.clientX-r.left))/w*(ACC.drag.t1-ACC.drag.t0);
-      ACC.t0=ACC.drag.t0+d;ACC.t1=ACC.drag.t1+d;accRender();return;
+      const w=ACC.W-ACC.padL-ACC.padR,h=ACC.H-ACC.padT-ACC.padB;
+      const dx=(ACC.drag.x-(e.clientX-r.left))/w*(ACC.drag.t1-ACC.drag.t0);
+      const dy=(ACC.drag.y-(e.clientY-r.top))/h*(ACC.drag.y1-ACC.drag.y0);
+      ACC.t0=ACC.drag.t0+dx;ACC.t1=ACC.drag.t1+dx;
+      ACC.y0=ACC.drag.y0+dy;ACC.y1=ACC.drag.y1+dy;
+      accRender();return;
     }
     if(Mini.drag)return;
     if(S.pane!=='access')return;
@@ -2813,9 +2846,10 @@ function accDrawAtime(C,c){
   }
   ACC.grid=grid;cx.globalAlpha=1;
 
-  /* --- 同 PC 轨迹：用细线把同一 PC 的连续访问依次连起来（选中事件后高亮其 PC） --- */
+  /* --- 同 PC 轨迹：用细线把同一 PC 的连续访问依次连起来（选中事件后高亮其 PC）。
+         受左侧「关联高亮」控制：仅在 relMode='pc' 时绘制（与全局关联高亮一致）。 --- */
   const selPc=(S.sel>=0)?(S.raw[S.sel].d.PC):null;
-  if(ACC.pcTraj&&c.byPc&&c.byPc.size){
+  if(ACC.pcTraj&&S.relMode==='pc'&&c.byPc&&c.byPc.size){
     // 无选中时仅在点数较少时画全局淡轨迹（概览）；选中后只高亮该 PC 的轨迹
     const globalMode=!selPc&&ACC.points.length<4000;
     cx.save();cx.setLineDash([]);
@@ -2830,14 +2864,27 @@ function accDrawAtime(C,c){
         if(y<plotY-3||y>plotY+plotH+3){st=false;continue;}
         if(!st){cx.moveTo(x,y);st=true;}else cx.lineTo(x,y);
       }
-      if(foc){cx.strokeStyle=C.rel;cx.lineWidth=1.4;cx.globalAlpha=.95;}
-      else{cx.strokeStyle='hsla('+((parseInt(p,16)||0)%360)+',65%,60%,0.18)';cx.lineWidth=0.8;cx.globalAlpha=1;}
+      // 弱化：聚焦 PC 用更淡的关联色细线，其余 PC 仅极淡的彩色提示
+      if(foc){cx.strokeStyle=C.rel;cx.lineWidth=1.0;cx.globalAlpha=.5;}
+      else{cx.strokeStyle='hsla('+((parseInt(p,16)||0)%360)+',60%,62%,0.10)';cx.lineWidth=0.7;cx.globalAlpha=1;}
       cx.stroke();
     }
     cx.globalAlpha=1;cx.restore();
   }
-  /* --- 同 PC 方框：可选，用方框框住选中事件所属 PC 的其它访问 --- */
-  if(ACC.pcBox&&selPc&&c.byPc&&c.byPc.has(selPc)){
+  /* --- 十字虚线：选中事件后在水平/垂直方向各画一条贯穿绘图区的虚线，便于对齐 --- */
+  if(S.sel>=0){
+    const spIdx=ACC.points.findIndex(p=>p.i===S.sel);
+    if(spIdx>=0){
+      const sp=ACC.points[spIdx];
+      cx.save();cx.strokeStyle=C.cross;cx.globalAlpha=.75;cx.lineWidth=1;cx.setLineDash([5,4]);
+      cx.beginPath();cx.moveTo(plotX,sp.y+.5);cx.lineTo(plotX+plotW,sp.y+.5);cx.stroke();   // 水平
+      cx.beginPath();cx.moveTo(sp.x+.5,plotY);cx.lineTo(sp.x+.5,plotY+plotH);cx.stroke();   // 垂直
+      cx.setLineDash([]);cx.globalAlpha=1;cx.restore();
+    }
+  }
+
+  /* --- 同 PC 方框：可选，用方框框住选中事件所属 PC 的其它访问（同样受 relMode='pc' 控制） --- */
+  if(ACC.pcBox&&S.relMode==='pc'&&selPc&&c.byPc&&c.byPc.has(selPc)){
     cx.save();cx.strokeStyle=C.rel;cx.lineWidth=1;cx.globalAlpha=.85;
     for(const e of c.byPc.get(selPc)){
       if(e.i===S.sel)continue;
@@ -3100,16 +3147,101 @@ function exportCsv(){
   dl((S.fileName||'trace').replace(/\.\w+$/,'')+'-filtered.csv',rows.join('\n'),'text/csv;charset=utf-8');
   msg('已导出 '+fmt(S.visIdx.length)+' 条事件');
 }
+function dlBlob(blob,fn){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=fn;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+}
+function activeCanvas(){
+  if(S.pane==='pipeline')return PV.cv;
+  if(S.pane==='access')return ACC.cv;
+  if(S.pane==='timeline')return TL.cv;
+  return null; // 表 / 统计 / 字典 等纯 HTML 视图无画布
+}
+/* 当前画布「有效区域」矩形（含轴刻度标签，剔除最外层空白），单位 CSS 像素 */
+function viewPlotRect(){
+  const cv=activeCanvas();
+  if(!cv)return null;
+  if(S.pane==='timeline')return {x:0,y:0,w:TL.W,h:Math.max(1,TL.H-TL.navH)};
+  if(S.pane==='pipeline')return {x:0,y:0,w:PV.W,h:PV.H};
+  if(S.pane==='access'){
+    if(ACC.view==='atime'){
+      const plotX=ACC.padL,plotW=ACC.W-ACC.padL-ACC.padR,plotY=ACC.padT,plotH=ACC.H-ACC.padT-ACC.padB;
+      const x0=Math.max(0,plotX-66), y0=Math.max(0,plotY-2);          // 保留左侧 y 轴标签
+      const x1=Math.min(ACC.W,plotX+plotW+4), y1=Math.min(ACC.H,plotY+plotH+20); // 保留底部 x 轴标签
+      return {x:x0,y:y0,w:Math.max(1,x1-x0),h:Math.max(1,y1-y0)};
+    }
+    return {x:0,y:0,w:ACC.W,h:ACC.H};
+  }
+  return {x:0,y:0,w:cv.clientWidth||cv.width,h:cv.clientHeight||cv.height};
+}
+/* 整页（主舞台）导出：用 foreignObject 把 #stage 快照到画布；canvas 元素转成其 toDataURL 的 img 以保留绘制内容 */
+function exportStagePng(name){
+  try{
+    const stage=$('stage');const r=stage.getBoundingClientRect();
+    const scale=Math.min(2,window.devicePixelRatio||1);
+    const w=Math.max(1,Math.ceil(r.width)),h=Math.max(1,Math.ceil(r.height));
+    let css='';
+    for(const sh of document.styleSheets){try{for(const rule of sh.cssRules)css+=rule.cssText+'\n';}catch(e){}}
+    const clone=stage.cloneNode(true);
+    clone.querySelectorAll('canvas').forEach(c=>{
+      const img=document.createElement('img');
+      try{img.src=c.toDataURL();}catch(e){img.src='';}
+      img.style.width=(c.clientWidth||0)+'px';img.style.height=(c.clientHeight||0)+'px';
+      img.className=c.className;img.id=c.id;
+      if(c.parentNode)c.parentNode.replaceChild(img,c);
+    });
+    clone.style.width=r.width+'px';clone.style.height=r.height+'px';clone.style.margin='0';
+    const html=new XMLSerializer().serializeToString(clone);
+    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'">'
+      +'<foreignObject width="100%" height="100%">'
+      +'<div xmlns="http://www.w3.org/1999/xhtml"><style>'+css+'</style>'+html+'</div>'
+      +'</foreignObject></svg>';
+    const svgBlob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
+    const url=URL.createObjectURL(svgBlob);
+    const img=new Image();
+    img.onload=()=>{
+      const off=document.createElement('canvas');
+      off.width=Math.ceil(w*scale);off.height=Math.ceil(h*scale);
+      const ctx=off.getContext('2d');ctx.scale(scale,scale);ctx.drawImage(img,0,0);
+      URL.revokeObjectURL(url);
+      try{ off.toBlob(b=>{ if(b)dlBlob(b,name+'.png'); else { msg('整页导出受限，改用当前画布'); exportCanvasOnly(name); } },'image/png'); }
+      catch(e){ msg('整页导出受限（foreignObject 跨域限制），改用当前画布'); exportCanvasOnly(name); }
+      msg('已导出整页截图');
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(url); msg('整页导出失败，改用当前画布'); exportCanvasOnly(name); };
+    img.src=url;
+  }catch(e){ msg('整页导出失败：'+e.message); }
+}
+function exportCanvasOnly(name){
+  const cv=activeCanvas();
+  if(!cv){msg('当前视图无画布可导出');return;}
+  cv.toBlob(b=>{ if(b)dlBlob(b,name+'.png'); else msg('导出失败'); },'image/png');
+}
 function exportPng(){
-  const cv=S.pane==='pipeline'?PV.cv:TL.cv;
-  if(!cv){alert('当前视图不支持导出图片');return;}
-  cv.toBlob(b=>{
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(b);
-    a.download=(S.fileName||'trace').replace(/\.\w+$/,'')+'-'+S.pane+'.png';
-    a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
-  });
-  msg('已导出视图截图');
+  const mode=$('pngMode')?$('pngMode').value:'full';
+  const base=(S.fileName||'trace').replace(/\.\w+$/,'');
+  const name=base+'-'+S.pane+(S.pane==='access'?('-'+ACC.view):'')+'-'+mode;
+  if(mode==='page'){exportStagePng(name);return;}
+  const cv=activeCanvas();
+  if(!cv){exportStagePng(name);return;} // HTML 视图无画布→整页
+  // 导出前重绘当前视图，确保画布为最新内容（避免与 rAF 重排竞态）
+  if(S.pane==='access')accRender();else if(S.pane==='timeline')tlDraw();else if(S.pane==='pipeline')pvDraw();
+  if(mode==='full'){
+    cv.toBlob(b=>{ if(b)dlBlob(b,name+'.png'); else msg('导出失败'); },'image/png');
+    msg('已导出视图截图（全画布）');
+    return;
+  }
+  // crop：裁剪到有效区域（带标尺），去除最外层空白
+  const rect=viewPlotRect();
+  const dpr=cv.width/Math.max(1,cv.clientWidth||1);
+  const cw=Math.max(1,Math.round(rect.w*dpr)),ch=Math.max(1,Math.round(rect.h*dpr));
+  const off=document.createElement('canvas');off.width=cw;off.height=ch;
+  const octx=off.getContext('2d');
+  octx.drawImage(cv,rect.x*dpr,rect.y*dpr,rect.w*dpr,rect.h*dpr,0,0,cw,ch);
+  off.toBlob(b=>{ if(b)dlBlob(b,name+'.png'); else msg('导出失败'); },'image/png');
+  msg('已导出视图截图（有效区域）');
 }
 
 /* =======================================================================
@@ -3179,6 +3311,17 @@ function bind(){
       '统计页新增「冗余预取」概览卡 + 详情小节：驻留窗口直方图（按距上次访问分桶）+ 驻留窗口敏感性表（256/1024/4096/8192/32768/不限），当前窗口行高亮标记',
       '侧栏「关联窗口」新增「冗余预取判定窗口（缓存驻留）」输入框，可调整后点「重算事务链路」即时重算',
       '【预防性修复】将所有 Math.max(...arr)/Math.min(...arr) 展开调用改为循环实现的 maxOf()/minOf() 助手：数组超过约 12 万个元素时 spread 会触发 RangeError 栈溢出（另一 AI 的 core.js 文档也提及此坑却仍在 core.js:339 提交了该写法）'
+    ]},
+    {v:'0.06.5',date:'2025-08-07',items:[
+      '【访存分析标签左移】标签顺序调整为 时序泳道 → 访存分析 → 流水线事务 → 事件表 → 统计分析 → 语义字典',
+      '【时序泳道拖拽修复】tlMove 读取了未定义的 TL.drag.my0（tlDown 仅设了 my）导致 TL.vScroll=NaN、图形消失；改为读取 TL.drag.my（双击复位）',
+      '【atime 双向拖拽】地址-时间视图支持按住拖拽在上下左右四个方向移动画面（此前仅左右）；纵轴范围自动初始化后随拖拽平移',
+      '【横向滚动滚轮】时序泳道 / 流水线 / 地址-时间 三视图新增：当 |deltaX|>|deltaY| 时按横向滚轮平移时间窗（不破坏 Shift+纵轴缩放与常规缩放）',
+      '【十字虚线】地址-时间视图选中事件后，在水平/垂直方向各画一条贯穿绘图区的虚线（C.cross 色），便于对齐',
+      '【同PC轨迹受关联高亮控制 + 弱化】同PC轨迹/方框改为仅在左侧「关联高亮=同PC」时绘制（修复此前不受控制的问题），并弱化连线颜色（聚焦 alpha .5 / 1.0px，其余更淡）',
+      '【PNG 导出重写】修复访存分析视图导出空白（此前回退到隐藏的 TL.cv）；新增 pngMode 下拉：全画布 / 有效区域(带标尺, 去空白) / 整页；支持任意标签视图（canvas 视图用画布，HTML 视图与整页用 foreignObject 快照，taint 时回退当前画布）',
+      '【按钮悬浮提示】为全部此前缺 title 的按钮补充 tooltip（打开/选择文件/文件夹/粘贴/字典导入导出/详情关闭/行高/全览缩放/时间窗/关联窗口等）',
+      '新增 test_v065.mjs（13 断言）覆盖上述交互；test_pctraj 同步适配 relMode 门控'
     ]},
     {v:'0.06.4',date:'2025-08-07',items:[
       '【同 PC 轨迹 + 方框】地址-时间视图新增「同PC轨迹」开关（默认开启）：选中事件后用细线连接同一 PC 的连续访问（聚焦高亮其 PC，其余 PC 淡色显示）；新增「同PC方框」开关（默认关闭）：用小方框框住选中事件所属 PC 的其它访问',
@@ -3270,7 +3413,7 @@ function bind(){
   function renderAbout(){
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06.4</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06.5</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
