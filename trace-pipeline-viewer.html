@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06.7</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06.8</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06.7">
+<meta name="version" content="0.06.8">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -270,7 +270,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06.7 · 作者 konglingjun">v0.06.7</span></div>
+    <span class="ver" id="verTag" title="版本 0.06.8 · 作者 konglingjun">v0.06.8</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -285,12 +285,13 @@ table.st td.num{text-align:right}
   </div>
   <div class="spacer"></div>
   <button class="btn sm" id="btnCsv" title="导出当前过滤结果为 CSV">⬇ CSV</button>
-  <select class="inp sm" id="pngMode" title="PNG 导出范围：全画布 / 有效区域(带标尺) / 整页">
+  <select class="inp sm" id="pngMode" title="PNG / SVG 导出范围：全画布 / 有效区域(带标尺,去空白) / 整页(完整前端)">
     <option value="full">全画布</option>
     <option value="crop">有效区域</option>
     <option value="page">整页</option>
   </select>
   <button class="btn sm" id="btnPng" title="导出当前视图为 PNG（范围见左侧下拉）">⬇ PNG</button>
+  <button class="btn sm" id="btnSvg" title="导出当前视图为 SVG（范围见左侧下拉；整页为矢量可缩放，可用浏览器直接打开）">⬇ SVG</button>
   <button class="btn sm" id="btnTheme" title="切换主题（深色/浅色/米色）">◐</button>
   <button class="btn sm" id="btnMini" title="时间轴缩略图位置：上方 / 下方 / 关闭">🗺↓</button>
   <button class="btn sm" id="btnAbout" title="关于本工具 / 开发报告 / 更新记录">ⓘ</button>
@@ -2297,6 +2298,7 @@ function statsRender(){
   });
   const gx=$('btnGotoX');
   if(gx&&xEvt.length)gx.onclick=()=>{switchPane('timeline');tlFocus(raw[xEvt[0]].cyc);selectEvent(xEvt[0],true);};
+  bindTooltips();
 }
 
 /* =======================================================================
@@ -2311,7 +2313,7 @@ function dictRender(){
     +'<button class="btn" id="dExp" title="导出当前字段/取值标签字典为 JSON">⬇ 导出字典 JSON</button>'
     +'<button class="btn" id="dImp" title="从 JSON 导入字段/取值标签字典">⬆ 导入字典 JSON</button>'
     +'<button class="btn" id="dRst" title="恢复工具内置的默认字典">↺ 恢复内置默认</button>'
-    +'<input type="file" id="dFile" accept=".json" style="display:none">'
+    +'<input type="file" id="dFile" accept=".json" style="display:none" title="选择语义字典文件（JSON）导入">'
     +'</div>';
 
   h+='<div class="panel"><h4>事件类型标签</h4>';
@@ -2335,10 +2337,11 @@ function dictRender(){
 
   h+='<div class="panel"><h4>取值标签（事件类型.字段 → 取值）</h4>'
     +'<div class="hint">为具体取值加中文说明，会显示在提示气泡、详情面板和统计页里。格式：一行一条 <code>TAG.FIELD.VALUE = 说明</code></div>'
-    +'<textarea class="inp" id="dVals" style="min-height:170px;font-family:var(--mono)"></textarea>'
+    +'<textarea class="inp" id="dVals" style="min-height:170px;font-family:var(--mono)" title="编辑语义映射（一行一条「TAG.FIELD.VALUE = 说明」；键=原始值，值=显示名）"></textarea>'
     +'<button class="btn primary sm" id="dSaveVals" style="margin-top:8px" title="保存取值标签修改到浏览器本地">保存取值标签</button></div>';
 
   $('dictBody').innerHTML=h;
+  bindTooltips($('dictBody'));
 
   const lines=[];
   for(const key in DICT.values)for(const v in DICT.values[key])lines.push(key+'.'+v+' = '+DICT.values[key][v]);
@@ -2406,6 +2409,7 @@ function refreshTags(){
   el.querySelectorAll('input').forEach(cb=>cb.onchange=()=>{
     S.tagOn[cb.dataset.t]=cb.checked;applyFilter();
   });
+  bindTooltips(el); // 动态生成的标签行补悬浮提示
 }
 /* =======================================================================
    11.5 时间轴缩略图（minimap）
@@ -2561,7 +2565,7 @@ function switchPane(p){
     else if(p==='stats')statsRender();
     else if(p==='access'){accResize();accRender();}
     else if(p==='dict')dictRender();
-    miniMount();
+    miniMount();bindTooltips();
   });
 }
 function redraw(){
@@ -3072,6 +3076,92 @@ function dl(name,content,type){
 }
 
 /* =======================================================================
+   交互对象悬浮提示：为按钮 / 开关 / 选项 / 输入 / 标签页 / 折叠节 / 动态标签行 /
+   事件表与统计卡片等补充 title，悬浮即显示功能说明。
+   - 先按 id 字典赋值（curated，质量最好）；
+   - 再对无 title 的交互元素按类型/类名兜底；
+   - 海量数据行（事件表/统计卡）用懒加载式 mouseover 首次悬浮时补充，避免一次性扫描。
+   幂等：已有 title 的元素不被覆盖。 */
+function bindTooltips(root){
+  root=root||document;
+  const TIP={
+    btnSide:'折叠 / 展开左侧过滤侧栏',
+    btnOpen:'打开并加载一个 Trace 文件（也可从文件夹批量选择）',
+    fPc:'按 PC 子串过滤（多个用逗号分隔），命中即显示',
+    fAddl:'按缓存行 ADDL 子串过滤',
+    fIid:'按指令 ID / IID 过滤',
+    fText:'对任意字段做全文关键字过滤',
+    fExpr:'高级表达式：每行一条字段条件，AND 关系；支持 = != ~ > < >= <=',
+    fT0:'时间窗口起始周期（留空为 0）',
+    fT1:'时间窗口结束周期（留空为最大周期）',
+    btnFitWin:'按上方起始/结束周期过滤，并把时间轴缩放到该窗口',
+    oLink:'勾选后在时序泳道显示事务链路连线',
+    oAddr:'勾选后显示缓存行地址标注',
+    oLabel:'勾选后显示事件类型 / 字段标签',
+    oGrid:'勾选后显示网格参考线',
+    oCyc:'关联判定的时间窗口（周期）上界',
+    relMode:'选中事件后的关联高亮方式：关闭 / 同 PC / 同 ADDL',
+    wL2:'L2 事务关联窗口（周期）：同缓存行访问间隔小于此值视为同一事务',
+    wAr:'到达时间窗口（周期）',
+    wLead:'前置 Lead 时间窗口（周期）',
+    wAw:'分配（AW）窗口（周期）',
+    wGap:'间隙窗口（周期）',
+    wResid:'缓存驻留窗口（周期）：用于冗余预取判定（默认 8192）',
+    btnWin:'应用上述关联窗口并重算事务链路',
+    tlFit:'时序泳道适应全部时间范围',
+    tlIn:'时序泳道放大（时间轴变窄，细节更密）',
+    tlOut:'时序泳道缩小（时间轴变宽）',
+    pvKind:'流水线事务视图类型',
+    pvSort:'流水线事务排序方式',
+    pvSlow:'仅显示慢事务（超过延迟阈值的访问）',
+    pvMerge:'合并同一事务的多次访问',
+    accView:'访存分析子视图：地址-时间 / 地址热点 / 访问步幅 / 重访间隔',
+    accAxis:'纵轴模式：数值地址 / 缓存行（每行一个）',
+    pcTraj:'选中事件后用细线连接同一 PC 的连续访问（需关联高亮=同PC）',
+    pcBox:'用方框框住选中事件所属 PC 的其它访问（需关联高亮=同PC）',
+    accK:'地址热点 Top-N 行数',
+    dFile:'选择语义字典文件（JSON）导入',
+    dVals:'编辑语义映射（键=原始值，值=显示名），每行一条',
+    tbCols:'事件表显示列配置',
+    btnGotoX:'跳转到指定周期 / 事件',
+    btnPasteLoad:'将粘贴框中的 Trace 文本加载为数据源',
+    btnPasteClear:'清空粘贴框',
+    pasteArea:'在此粘贴 Trace 文本（文件对话框被拦截时的回退加载方式）'
+  };
+  for(const id in TIP){ const el=root.getElementById?root.getElementById(id):null; if(el&&!el.title)el.title=TIP[id]; }
+  const sel='button,input,select,textarea,.tab,.tagrow,.chip,.sec>h3,a[href],.lgi,[role=button]';
+  root.querySelectorAll(sel).forEach(el=>{
+    if(el.title)return;
+    const tag=el.tagName.toLowerCase();
+    if(el.classList.contains('tab')){ el.title='切换到「'+el.textContent.trim()+'」视图'; return; }
+    if(el.classList.contains('tagrow')){ el.title='点击切换该事件类型的显示 / 隐藏'; return; }
+    if(el.classList.contains('chip')){ el.title=el.textContent.trim(); return; }
+    if(el.classList.contains('lgi')){ el.title=el.textContent.trim(); return; }
+    if(tag==='h3'){ el.title='点击展开 / 折叠此节'; return; }
+    if(tag==='a'){ el.title=el.textContent.trim()||(el.getAttribute('href')||''); return; }
+    if(tag==='button'){ const t=el.textContent.replace(/[⬇◐🗺▼▲▣◑\s]/g,'').trim(); el.title=t?('点击：'+t):'操作按钮'; return; }
+    if(tag==='input'){
+      if(el.type==='checkbox'&&el.closest('.tagrow')){ const p=el.closest('.tagrow'); el.title=p.title||'点击切换该事件类型的显示 / 隐藏'; return; } // 复选框随外层 .tagrow 同提示
+      el.title=el.placeholder||('输入：'+(el.id||'')); return;
+    }
+    if(tag==='select'){ el.title='选择：'+(el.options[el.selectedIndex]?el.options[el.selectedIndex].text:''); return; }
+    if(tag==='textarea'){ el.title=el.placeholder||'输入文本'; return; }
+  });
+}
+function lazyTip(){
+  document.addEventListener('mouseover',e=>{
+    const t=e.target; if(!t||!t.closest)return;
+    const el=t.closest('.vtrow,.card,.lgi,.kv');
+    if(el&&!el.title){
+      if(el.classList.contains('vtrow'))el.title='点击查看该事件详情';
+      else if(el.classList.contains('card'))el.title=el.querySelector('h4')?el.querySelector('h4').textContent.trim():'统计卡片';
+      else if(el.classList.contains('lgi'))el.title=el.textContent.trim();
+      else if(el.classList.contains('kv'))el.title=el.textContent.trim();
+    }
+  },true);
+}
+
+/* =======================================================================
    13. 文件加载
    ======================================================================= */
 function loadFile(f){
@@ -3292,6 +3382,64 @@ function exportPng(){
 }
 
 /* =======================================================================
+   PNG / SVG 导出 · SVG 变体
+   复用左侧「范围」下拉（pngMode）：整页 / 整个画布 / 有效区域。
+   - 整页：foreignObject 序列化 #app DOM → SVG 源（SVG 文件本身不受 Chromium 对
+     foreignObject 画布的 taint 限制，可直接存盘，浏览器打开即矢量渲染）；
+   - 画布类：内嵌 <image> 承载位图，full=整张画布，crop=按内容包围盒裁剪。 */
+function exportPageSvg(name){
+  try{
+    const root=$('app'); if(!root)return;
+    const r=root.getBoundingClientRect();
+    const w=Math.max(1,Math.ceil(r.width)),h=Math.max(1,Math.ceil(r.height));
+    let css='';
+    for(const sh of document.styleSheets){try{for(const rule of sh.cssRules)css+=rule.cssText+'\n';}catch(e){}}
+    const clone=root.cloneNode(true);
+    clone.querySelectorAll('.modal.on').forEach(m=>{ if(m.parentNode)m.parentNode.removeChild(m); });
+    clone.querySelectorAll('canvas').forEach(c=>{
+      const img=document.createElement('img');
+      try{img.src=c.toDataURL();}catch(e){img.src='';}
+      img.style.width=(c.clientWidth||0)+'px';img.style.height=(c.clientHeight||0)+'px';
+      img.className=c.className;img.id=c.id;
+      if(c.parentNode)c.parentNode.replaceChild(img,c);
+    });
+    clone.style.width=w+'px';clone.style.height=h+'px';clone.style.margin='0';clone.style.transform='none';clone.style.overflow='visible';
+    const html=new XMLSerializer().serializeToString(clone);
+    const svg='<?xml version="1.0" encoding="UTF-8"?>\n'
+      +'<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'">'
+      +'<foreignObject width="100%" height="100%">'
+      +'<div xmlns="http://www.w3.org/1999/xhtml"><style>'+css+'</style>'+html+'</div>'
+      +'</foreignObject></svg>';
+    dl(name+'.svg', svg, 'image/svg+xml;charset=utf-8');
+    msg('已导出整页 SVG（矢量，可用浏览器打开）');
+  }catch(e){ msg('整页 SVG 导出失败：'+e.message); }
+}
+function exportCanvasSvg(name,crop){
+  const cv=activeCanvas();
+  if(!cv){ exportPageSvg(name); return; } // 无画布的 HTML 视图回退到整页
+  if(S.pane==='access')accRender();else if(S.pane==='timeline')tlDraw();else if(S.pane==='pipeline')pvDraw();
+  let rect=null; if(crop) rect=tightCropRect(cv);
+  const W=rect?rect.w:cv.width, H=rect?rect.h:cv.height;
+  const vx=rect?rect.x:0, vy=rect?rect.y:0;
+  const data=cv.toDataURL();
+  const svg='<?xml version="1.0" encoding="UTF-8"?>\n'
+    +'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+    +'width="'+W+'" height="'+H+'" viewBox="'+vx+' '+vy+' '+W+' '+H+'">'
+    +'<image x="0" y="0" width="'+cv.width+'" height="'+cv.height+'" '
+    +'href="'+data+'" xlink:href="'+data+'"/>'
+    +'</svg>';
+  dl(name+'.svg', svg, 'image/svg+xml;charset=utf-8');
+  msg('已导出'+(crop?'有效区域':'整个画布')+' SVG');
+}
+function exportSvg(){
+  const mode=$('pngMode')?$('pngMode').value:'full';
+  const base=(S.fileName||'trace').replace(/\.\w+$/,'');
+  const name=base+'-'+S.pane+(S.pane==='access'?('-'+ACC.view):'')+'-'+mode;
+  if(mode==='page'){ exportPageSvg(name); return; }
+  exportCanvasSvg(name, mode==='crop');
+}
+
+/* =======================================================================
    15. 事件绑定
    ======================================================================= */
 function bind(){
@@ -3358,6 +3506,10 @@ function bind(){
       '统计页新增「冗余预取」概览卡 + 详情小节：驻留窗口直方图（按距上次访问分桶）+ 驻留窗口敏感性表（256/1024/4096/8192/32768/不限），当前窗口行高亮标记',
       '侧栏「关联窗口」新增「冗余预取判定窗口（缓存驻留）」输入框，可调整后点「重算事务链路」即时重算',
       '【预防性修复】将所有 Math.max(...arr)/Math.min(...arr) 展开调用改为循环实现的 maxOf()/minOf() 助手：数组超过约 12 万个元素时 spread 会触发 RangeError 栈溢出（另一 AI 的 core.js 文档也提及此坑却仍在 core.js:339 提交了该写法）'
+    ]},
+    {v:'0.06.8',date:'2025-08-07',items:[
+      '【SVG 下载】PNG 按钮右侧新增「⬇ SVG」按钮，复用同一「范围」下拉：整页（foreignObject 矢量，浏览器直接打开）/ 整个画布（内嵌 <image> 位图）/ 有效区域（按内容包围盒裁剪）。SVG 文件本身不受 Chromium 对 foreignObject 画布的 taint 限制，可直接存盘',
+      '【交互对象悬浮提示全覆盖】新增 bindTooltips()+lazyTip()：按 id 字典为按钮/开关/选项/输入（PC/ADDL/IID/全文/高级表达式/时间窗/关联窗口各项/纵轴模式/同PC轨迹与方框/Top-N/字典导入等）补充 title；并通用兜底标签页/折叠节/动态标签行/事件表与统计卡片（懒加载式），悬浮即显示功能说明。所有交互元素均覆盖'
     ]},
     {v:'0.06.7',date:'2025-08-07',items:[
       '【PNG 整页导出修复（缺陷）】原 foreignObject 方案在 Chromium 下会污染画布（toBlob 抛 SecurityError）导致静默回退到单画布——"整页"实际只导出当前画布。改为 DOM→Canvas 合成器：直接遍历实时 #app，按其真实 getBoundingClientRect 重绘顶栏/侧栏/主舞台/底栏，可见 <canvas> 以 drawImage 原样并入，彻底规避 taint，真正导出整个前端页面',
@@ -3470,7 +3622,7 @@ function bind(){
   function renderAbout(){
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06.7</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06.8</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
@@ -3513,6 +3665,7 @@ function bind(){
   $('aboutModal').addEventListener('click',e=>{if(e.target===$('aboutModal'))closeAbout();});
   $('btnCsv').onclick=exportCsv;
   $('btnPng').onclick=exportPng;
+  $('btnSvg').onclick=exportSvg;
   $('dClose').onclick=()=>{$('detail').classList.remove('on');S.sel=-1;S.hlAddl=null;S.relSet=null;redraw();};
 
   document.querySelectorAll('.sec>h3').forEach(hh=>hh.onclick=()=>hh.parentElement.classList.toggle('closed'));
@@ -3600,7 +3753,7 @@ function bind(){
 /* =======================================================================
    16. 启动
    ======================================================================= */
-tlInit();pvInit();accInit();miniInit();bind();
+tlInit();pvInit();accInit();miniInit();bind();bindTooltips();lazyTip();
 tlResize();pvResize();accResize();tlDraw();miniMount();
 </script>
 </body>
