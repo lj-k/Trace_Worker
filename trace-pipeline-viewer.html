@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06.3</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06.4</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06.3">
+<meta name="version" content="0.06.4">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -267,7 +267,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06.3 · 作者 konglingjun">v0.06.3</span></div>
+    <span class="ver" id="verTag" title="版本 0.06.3 · 作者 konglingjun">v0.06.4</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -462,6 +462,8 @@ table.st td.num{text-align:right}
           </select>
         </div>
         <div class="g" id="accAxisWrap"><label class="sw" title="每个不同缓存行占一行，点的水平位置即访问时刻"><input type="checkbox" id="accAxis"> 地址轴按行号</label></div>
+        <div class="g" id="accPcWrap"><label class="sw" title="用细线连接同一 PC 的连续访问；选中事件后高亮其 PC 轨迹"><input type="checkbox" id="pcTraj" checked> 同PC轨迹</label>
+          <label class="sw" title="用方框框住选中事件所属 PC 的其它访问"><input type="checkbox" id="pcBox"> 同PC方框</label></div>
         <div class="g" id="accKWrap">Top-N <input class="inp" id="accK" value="40" style="width:54px;padding:2px 5px"></div>
         <div class="hsep"></div>
         <div class="g">事件 <span class="chip" id="accEv">—</span></div>
@@ -2493,20 +2495,19 @@ function miniDown(e){
   else if(x>x0&&x<x1)mode='pan';
   else mode='new';
   const xc=miniX2cyc(x);
-  Mini.drag={mode,xc,a,b};
+  Mini.drag={mode,xc,a,b,anchor:xc};
   if(mode==='new'){const w=b-a;let na=xc-w/2,nb=xc+w/2;if(na<min){na=min;nb=min+w;}if(nb>max){nb=max;na=max-w;}c.setWin(na,nb);Mini.drag.a=na;Mini.drag.b=nb;Mini.drag.xc=xc;Mini.drag.anchor=xc;}
 }
 function miniMove(e){
   if(!Mini.drag)return;
   const c=miniController();const r=Mini.cv.getBoundingClientRect();const x=e.clientX-r.left;
   const min=S.minCyc,max=S.maxCyc,rg=Math.max(1,max-min);
-  const cc=miniX2cyc(x),d=cc-Mini.drag.xc;
+  const cc=miniX2cyc(x);
   let a=Mini.drag.a,b=Mini.drag.b;
-  if(Mini.drag.mode==='pan'){a=Mini.drag.a+d;b=Mini.drag.b+d;}
-  else if(Mini.drag.mode==='new'){
-    if(Math.abs(cc-Mini.drag.anchor)>3){ // 从空白区拖动 → 绘制全新时间选区（按下点为起点）
-      a=Math.min(Mini.drag.anchor,cc);b=Math.max(Mini.drag.anchor,cc);
-    }else{a=Mini.drag.a+d;b=Mini.drag.b+d;} // 否则保持宽度平移（单击重定位）
+  // 非边缘位置一律「拖拽选新窗口」（橡皮筋，按下点为起点）；仅左右边缘用于缩放当前选区宽度。
+  // 此前在窗口已铺满整条 trace 时，所有落点都落入 pan 模式导致拖动无效果——这里改为始终新建选区。
+  if(Mini.drag.mode!=='l'&&Mini.drag.mode!=='r'){
+    a=Math.min(Mini.drag.anchor,cc);b=Math.max(Mini.drag.anchor,cc);
   }
   else if(Mini.drag.mode==='l')a=cc;
   else if(Mini.drag.mode==='r')b=cc;
@@ -2560,7 +2561,7 @@ function redraw(){
    数据全部来自 S.visIdx 中含 ADDL 字段的事件，随侧栏过滤实时联动。
    ======================================================================= */
 const ACC={cv:null,cx:null,W:0,H:0,dpr:1,
-  view:'atime',axis:'num',k:40,
+  view:'atime',axis:'num',k:40,pcTraj:true,pcBox:false,
   t0:NaN,t1:NaN,_minC:0,_maxC:1,drag:null,hover:null,_view:undefined,_cs:-1,
   y0:NaN,y1:NaN,                 // 纵轴（地址/缓存行）可见范围；Shift+滚轮缩放
   cache:null,stamp:-1,points:[],grid:null,padL:62,padR:14,padT:30,padB:30};
@@ -2666,6 +2667,14 @@ function accBuild(){
     let arr=byAddl.get(e.addlStr);if(!arr){arr=[];byAddl.set(e.addlStr,arr);}arr.push(e);
     if(e.addl<minA)minA=e.addl;if(e.addl>maxA)maxA=e.addl;
   }
+  // 同 PC 分组（按时间排序），供「同 PC 轨迹」细线连接与「同 PC 方框」使用
+  const byPc=new Map();
+  for(const e of ev){
+    const p=raw[e.i].d.PC;
+    if(p===undefined||p==='')continue;
+    let arr=byPc.get(p);if(!arr){arr=[];byPc.set(p,arr);}arr.push(e);
+  }
+  for(const arr of byPc.values())arr.sort((a,b)=>a.cyc-b.cyc);
   let strideTotal=0,strideZero=0,stridePos=0,strideNeg=0,reuseTotal=0;
   const strideFreq=new Map(),reuseFreq=new Map();
   // 重访间隔分桶：首桶含 dc=0（同一周期内对同一行的多次访问）
@@ -2691,7 +2700,7 @@ function accBuild(){
     strideFreq.set(d,(strideFreq.get(d)||0)+1);
   }
   const strideTop=[...strideFreq.entries()].map(([d,c])=>({d,c})).sort((a,b)=>b.c-a.c).slice(0,30);
-  ACC.cache={ev,byAddl,minA,maxA,nAddl:byAddl.size,nEv:ev.length,
+  ACC.cache={ev,byAddl,byPc,minA,maxA,nAddl:byAddl.size,nEv:ev.length,
     strideTotal,strideZero,stridePos,strideNeg,strideTop,
     reuseTotal,reuseBuckets,reuseBucketsCnt:rb};
   ACC.stamp=S.visIdx.length;
@@ -2711,6 +2720,7 @@ function accRender(){
   $('accEv').textContent=fmt(c.nEv);
   $('accLines').textContent=fmt(c.nAddl);
   $('accAxisWrap').style.display=ACC.view==='atime'?'':'none';
+  $('accPcWrap').style.display=ACC.view==='atime'?'':'none';
   $('accKWrap').style.display=ACC.view==='hot'?'':'none';
   if(ACC.view==='atime')accDrawAtime(C,c);
   else if(ACC.view==='hot')accDrawHot(C,c);
@@ -2802,6 +2812,43 @@ function accDrawAtime(C,c){
     let arr=grid.get(gk);if(!arr){arr=[];grid.set(gk,arr);}arr.push(idx);
   }
   ACC.grid=grid;cx.globalAlpha=1;
+
+  /* --- 同 PC 轨迹：用细线把同一 PC 的连续访问依次连起来（选中事件后高亮其 PC） --- */
+  const selPc=(S.sel>=0)?(S.raw[S.sel].d.PC):null;
+  if(ACC.pcTraj&&c.byPc&&c.byPc.size){
+    // 无选中时仅在点数较少时画全局淡轨迹（概览）；选中后只高亮该 PC 的轨迹
+    const globalMode=!selPc&&ACC.points.length<4000;
+    cx.save();cx.setLineDash([]);
+    for(const [p,arr] of c.byPc){
+      if(arr.length<2)continue;
+      if(!globalMode&&p!==selPc)continue;
+      const foc=p===selPc;
+      cx.beginPath();let st=false;
+      for(const e of arr){
+        const x=X(e.cyc);if(x<plotX-3||x>plotX+plotW+3){st=false;continue;}
+        const y=ACC.axis==='row'?Yrow(rowOf.get(e.addlStr)):Yaddl(e.addl);
+        if(y<plotY-3||y>plotY+plotH+3){st=false;continue;}
+        if(!st){cx.moveTo(x,y);st=true;}else cx.lineTo(x,y);
+      }
+      if(foc){cx.strokeStyle=C.rel;cx.lineWidth=1.4;cx.globalAlpha=.95;}
+      else{cx.strokeStyle='hsla('+((parseInt(p,16)||0)%360)+',65%,60%,0.18)';cx.lineWidth=0.8;cx.globalAlpha=1;}
+      cx.stroke();
+    }
+    cx.globalAlpha=1;cx.restore();
+  }
+  /* --- 同 PC 方框：可选，用方框框住选中事件所属 PC 的其它访问 --- */
+  if(ACC.pcBox&&selPc&&c.byPc&&c.byPc.has(selPc)){
+    cx.save();cx.strokeStyle=C.rel;cx.lineWidth=1;cx.globalAlpha=.85;
+    for(const e of c.byPc.get(selPc)){
+      if(e.i===S.sel)continue;
+      const x=X(e.cyc);if(x<plotX-3||x>plotX+plotW+3)continue;
+      const y=ACC.axis==='row'?Yrow(rowOf.get(e.addlStr)):Yaddl(e.addl);
+      if(y<plotY-3||y>plotY+plotH+3)continue;
+      cx.strokeRect(x-3,y-3,6,6);
+    }
+    cx.globalAlpha=1;cx.restore();
+  }
+
   if(ACC.hover!==null&&ACC.hover>=0&&ACC.hover<ACC.points.length){
     const p=ACC.points[ACC.hover];
     cx.strokeStyle=C.markHi;cx.lineWidth=1.6;cx.beginPath();cx.arc(p.x,p.y,(ACC.axis==='row'?3:4),0,7);cx.stroke();
@@ -3133,6 +3180,13 @@ function bind(){
       '侧栏「关联窗口」新增「冗余预取判定窗口（缓存驻留）」输入框，可调整后点「重算事务链路」即时重算',
       '【预防性修复】将所有 Math.max(...arr)/Math.min(...arr) 展开调用改为循环实现的 maxOf()/minOf() 助手：数组超过约 12 万个元素时 spread 会触发 RangeError 栈溢出（另一 AI 的 core.js 文档也提及此坑却仍在 core.js:339 提交了该写法）'
     ]},
+    {v:'0.06.4',date:'2025-08-07',items:[
+      '【同 PC 轨迹 + 方框】地址-时间视图新增「同PC轨迹」开关（默认开启）：选中事件后用细线连接同一 PC 的连续访问（聚焦高亮其 PC，其余 PC 淡色显示）；新增「同PC方框」开关（默认关闭）：用小方框框住选中事件所属 PC 的其它访问',
+      'accBuild() 新增 byPc Map：按 PC 分组可见事件并按 cyc 升序排列，跳过无 PC/空 PC 事件（NaN 安全），仅含同时有 ADDL+PC 的事件',
+      '【缩略图拖拽选窗】修复 minimap 全范围时所有落点落入 pan 模式导致拖拽无效的缺陷；改为任意非边缘位置按下并拖动均绘制全新时间选区（橡皮筋），左右边缘仍用于缩放当前选区宽度',
+      '新增 test_pctraj.mjs（11 断言）：锁定同PC轨迹/方框——默认状态、byPc 分组正确性、像素级渲染差异、无运行时错误',
+      '新增 test_mini.mjs（7 断言）：锁定缩略图拖拽选窗——全范围新建选区、边缘缩放、无运行时错误'
+    ]},
     {v:'0.06.3',date:'2025-08-07',items:[
       '【对比审查收尾】完成另一 AI（memtrace v1.1.0）views.js（808 行）逐行复查，连同此前 core.js（719 行）构成完整对照',
       '复查结论：本工具在 X/Z 未定义态、冗余预取口径、Math.max 栈溢出预防、缩放轴跨度钳制（map 视图纵轴 / timeline 横轴均已钳制，无除零 NaN）、字段谓词过滤器（= != ~ > < >= <= + 周期区间 + PC/ADDL/IID/全文，超集于对方）六个维度均已达标或更优',
@@ -3216,7 +3270,7 @@ function bind(){
   function renderAbout(){
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06.3</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06.4</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
@@ -3270,6 +3324,8 @@ function bind(){
   ['fPc','fAddl','fIid','fText','fExpr','fT0','fT1'].forEach(id=>$(id).addEventListener('input',deb));
   ['oLink','oAddr','oLabel','oGrid'].forEach(id=>$(id).onchange=redraw);
   $('relMode').onchange=()=>{S.relMode=$('relMode').value;computeRel();redraw();};
+  $('pcTraj').onchange=()=>{ACC.pcTraj=$('pcTraj').checked;accRender();};
+  $('pcBox').onchange=()=>{ACC.pcBox=$('pcBox').checked;accRender();};
   $('oCyc').onchange=()=>{
     const v=Number($('oCyc').value)||1;
     S.cycUnit=v;
