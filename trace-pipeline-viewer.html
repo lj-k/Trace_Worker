@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06.9</title>
+<title>CPU 访存 Trace 流水线分析器 v0.06.10</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06.9">
+<meta name="version" content="0.06.10">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -157,7 +157,7 @@ canvas{display:block;position:absolute;inset:0;width:100%;height:100%}
 .chip{background:var(--bg3);border:1px solid var(--line);border-radius:11px;padding:2px 9px;font-family:var(--mono);font-size:10.5px}
 
 /* 悬浮提示 */
-#tip{position:fixed;z-index:200;background:var(--bg2);border:1px solid var(--line2);border-radius:7px;padding:8px 10px;font-family:var(--mono);font-size:11px;line-height:1.6;pointer-events:none;display:none;max-width:440px;box-shadow:0 10px 34px var(--shadow)}
+#tip{position:fixed;z-index:90;background:var(--bg2);border:1px solid var(--line2);border-radius:7px;padding:8px 10px;font-family:var(--mono);font-size:11px;line-height:1.6;pointer-events:none;display:none;max-width:440px;box-shadow:0 10px 34px var(--shadow)}
 #tip .t{color:var(--acc);font-weight:700;margin-bottom:4px;font-family:var(--sans)}
 #tip .kv{color:var(--fg2)}
 #tip .kv b{color:var(--fg);font-weight:600}
@@ -247,7 +247,7 @@ table.st td.num{text-align:right}
 .sw input{accent-color:var(--acc);cursor:pointer}
 
 /* 弹窗（关于 / 开发报告） */
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:50}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:100}
 .modal.on{display:flex}
 .modalbox{background:var(--bg2);border:1px solid var(--line);border-radius:10px;width:min(880px,92vw);max-height:86vh;display:flex;flex-direction:column;box-shadow:0 14px 50px var(--shadow)}
 .modalhead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13.5px}
@@ -270,7 +270,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06.9 · 作者 konglingjun">v0.06.9</span></div>
+    <span class="ver" id="verTag" title="版本 0.06.10 · 作者 konglingjun">v0.06.10</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -3619,6 +3619,11 @@ function bind(){
 
   /* ---- 关于 / 开发报告 / 更新记录 ---- */
   const CHANGELOG=[
+    {v:'0.06.10',date:'2025-08-10',items:[
+      '【修复】关于弹窗无法关闭（缺陷）：renderAbout() 用 innerHTML 注入更新记录时未转义，v0.06.7 条目中字面量文本「可见 <canvas> 以 drawImage…」被浏览器解析成真实的全屏 <canvas> 元素，盖在关闭按钮之上拦截所有点击。改为注入前对每条目做 HTML 转义（&/</>/”），弹窗内容不再含任何真实 canvas/svg，关闭按钮恢复可点',
+      '【修复】初始页打开关于后遮挡 / 层次错乱（缺陷）：#loader 与 .modal 原同为 z-index:50，在尚未加载 trace 的初始页 loader 后绘制盖住弹窗；同时 .modal(50) 低于 header(60) 与 #tip(200)。调整为 .modal→100、#tip→90（保留 pointer-events:none），形成 弹窗(100) > 悬浮提示(90) > 加载遮罩/顶栏(50/60) 的正确层次，弹窗始终置顶',
+      '【测试框架】新增前端完整回归测试：基于 Playwright 的零依赖测试框架 tf.mjs（Suite 用例收集+执行+Markdown 报告、断言助手、下载拦截、SVG/PNG 导出助手）+ 综合套件 test_frontend.mjs（覆盖启动 / 6 视图切换 / 关于弹窗[加载态+初始未加载态+重复开关] / 悬浮提示[无原生 title·不拦截·层次] / SVG 三模式矢量导出[良构·无 <image>·viewBox 唯一] / PNG 导出 / 预取统计 / 全程零运行时错误），21 项全部通过，产物 前端测试报告.md'
+    ]},
     {v:'0.06.9',date:'2025-08-07',items:[
       '【SVG 导出改为真矢量（缺陷修复）】原「整个画布 / 有效区域」模式把画布位图塞进 <image> 标签，放大即糊。改为 makeSvgCtx() 录制型 Canvas2D 上下文：临时替换各视图 ctx 后重跑既有绘制函数（tlDraw/accRender/pvDraw/miniDraw），把 fillRect/stroke/path/fillText 等调用录制成真正的 <rect>/<path>/<text> 图元，导出即矢量，可任意缩放不失真',
       '【修复】exportCanvasSvg 原先对录制出的 <svg> 再用正则追加第二个 viewBox，导致 XML 校验报「Attribute viewBox redefined」而文件损坏。改为把裁剪矩形直接传入 recordCanvasSVG→toSvg，viewBox/width/height 一次性正确生成（整页/整个画布/有效区域三种范围均经 DOMParser 校验 well-formed）',
@@ -3746,9 +3751,10 @@ function bind(){
     ]}
   ];
   function renderAbout(){
+    const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06.9</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.06.10</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
@@ -3779,7 +3785,7 @@ function bind(){
     h+='<h4>更新记录</h4><table class="verrow"><thead><tr><th>版本</th><th>日期</th><th>变更</th></tr></thead><tbody>';
     for(const c of CHANGELOG){
       h+='<tr class="verrow"><td>v'+c.v+'</td><td>'+c.date+'</td><td><ul style="margin:2px 0">'
-        +c.items.map(x=>'<li>'+x+'</li>').join('')+'</ul></td></tr>';
+        +c.items.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></td></tr>';
     }
     h+='</tbody></table>';
     $('aboutBody').innerHTML=h;
