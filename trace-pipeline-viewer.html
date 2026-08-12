@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.06.10</title>
+<title>CPU 访存 Trace 流水线分析器 v0.07.0</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.06.10">
+<meta name="version" content="0.07.0">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -270,7 +270,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.06.10 · 作者 konglingjun">v0.06.10</span></div>
+    <span class="ver" id="verTag" title="版本 0.07.0 · 作者 konglingjun">v0.07.0</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
@@ -578,11 +578,11 @@ const BUILTIN = {
     LCHe :{label:'LSIQ 表项(one-hot)', onehot:true},
     SDIQ :{label:'存数据队列表项(one-hot)', onehot:true},
     MMUr :{label:'MMU 就绪'},
-    SIZE :{label:'传输大小 log2(B)'},
-    LENG :{label:'突发长度-1'},
+    SIZE :{label:'传输大小 log2(B)', decode:{kind:'size'}},
+    LENG :{label:'突发长度-1',     decode:{kind:'len'}},
     BURS :{label:'突发类型'},
-    CACH :{label:'Cache 属性'},
-    PROT :{label:'保护属性'},
+    CACH :{label:'Cache 属性',     decode:{kind:'cache'}},
+    PROT :{label:'保护属性',       decode:{kind:'prot'}},
     LOCK :{label:'锁定'},
     BARR :{label:'屏障类型'},
     DOMA :{label:'一致性域'},
@@ -652,6 +652,96 @@ const LS_KEY='c910trace.dict.v1';
 let DICT=JSON.parse(JSON.stringify(BUILTIN));
 try{const s=localStorage.getItem(LS_KEY);if(s){const o=JSON.parse(s);
   DICT.tags=Object.assign(DICT.tags,o.tags||{});DICT.fields=Object.assign(DICT.fields,o.fields||{});DICT.values=Object.assign(DICT.values,o.values||{});}}catch(e){}
+
+/* =======================================================================
+   0b. 通用化：profile（角色绑定 + 协议编码），内置 openC910 默认方案
+   -----------------------------------------------------------------------
+   设计目标（用户诉求①）：把「trace 具体标签名 / 字段名 / 字段编码」与
+   「通用事件角色」解耦。用户把自有 trace 的 tag/字段绑定到预设角色
+   （demand-load-issue / prefetch-req / bus-read-addr …），标签或编码变化后
+   只需改绑定（或加载另一个 profile JSON）即可重新分析，无需改代码。
+   openC910 作为出厂默认 profile，现有行为完全一致。
+   ======================================================================= */
+const LS_PROFILE='tpv_profile.v1';
+const BUILTIN_PROFILE={
+  meta:{name:'openC910 (内置默认)', protocol:{bus:'AXI4', version:'openC910'},
+        note:'openC910 / Triverse 预取器 trace 的内置默认绑定方案'},
+  // 字段角色：把「地址 / 指令ID / PC / 来源通道 / 就绪门控」抽象为角色，
+  // 取代散落在 buildTxns 各处的 e.d.ADDL / e.d.IID / e.d.PC / e.d.FROM / e.d.READY 字面量。
+  roles:{
+    addr:{field:'ADDL', lineSizeLog2:6, normalize:true},
+    id:{field:'IID'},
+    pc:{field:'PC'},
+    from:{field:'FROM'},
+    ready:{field:'READY'}
+  },
+  // 事件 → 角色映射。match.tag 为主匹配；match.field 用于 ACE/CHI 同 tag 靠字段区分角色。
+  // stage 为事务重建时该事件所处的阶段名；key 为配对键角色。
+  events:[
+    {match:{tag:'LSU_LD_PIPE3'}, role:'demand-load-issue', key:'id',   stage:'PIPE3'},
+    {match:{tag:'LSU_LD_DA_fwd'}, role:'demand-load-da',    key:'id',   stage:'DA'},
+    {match:{tag:'LSU_LD_WB_pg'},   role:'demand-load-wb',    key:'id',   stage:'WB'},
+    {match:{tag:'LSU_ST_PIPE4'},   role:'demand-store-issue',key:'id',   stage:'ST'},
+    {match:{tag:'TriPF_L2'},       role:'prefetch-req',      key:'addr', stage:'PF-REQ'},
+    {match:{tag:'L2C_CMP'},        role:'cache-lookup',      key:'addr', stage:'L2-CMP'},
+    {match:{tag:'BIU_PAD_AR'},     role:'bus-read-addr',     key:'addr', stage:'AXI-AR'},
+    {match:{tag:'BIU_PAD_AW'},     role:'bus-write-addr',    key:'addr', stage:'AW'}
+  ],
+  // 事务重建规则：取代 buildTxns 的硬编码白名单。stage 序列 + 配对键。
+  txns:{
+    load:   {stages:['demand-load-issue','demand-load-da','demand-load-wb'], key:'id'},
+    store:  {stages:['demand-store-issue'], key:'id',
+             link:[{role:'bus-write-addr', key:'addr', window:500, weak:true}]},
+    prefetch:{stages:['prefetch-req','cache-lookup','bus-read-addr'], key:'addr',
+              pfLead:4096, pfResid:8192, l2cmp:80, axiar:4000},
+    line:   {groupBy:'addr', gap:2000}
+  },
+  tags:BUILTIN.tags, fields:BUILTIN.fields, values:BUILTIN.values
+};
+let PROFILE=JSON.parse(JSON.stringify(BUILTIN_PROFILE));
+try{const s=localStorage.getItem(LS_PROFILE);if(s){const o=JSON.parse(s);
+  if(o.roles)PROFILE.roles=o.roles;
+  if(o.events)PROFILE.events=o.events;
+  if(o.txns)PROFILE.txns=o.txns;
+  if(o.meta)PROFILE.meta=o.meta;
+}}catch(e){}
+// 按 tag 建事件规格索引（一个 tag 可能对应多个规格，用于 ACE/CHI 字段区分）
+let EVENT_BY_TAG={};
+for(const ev of PROFILE.events)if(ev.match.tag)(EVENT_BY_TAG[ev.match.tag]||(EVENT_BY_TAG[ev.match.tag]=[])).push(ev);
+// 角色分类：原始事件 → 通用角色（或 null）
+function roleOf(e){
+  const list=EVENT_BY_TAG[e.tag]; if(!list)return null;
+  for(const ev of list){
+    if(ev.match.field){let ok=true;for(const fk in ev.match.field){const want=ev.match.field[fk];const v=e.d[fk];
+      if(Array.isArray(want)?!want.includes(v):want!==v){ok=false;break;}}if(!ok)continue;}
+    return ev.role;
+  }
+  return list.length?list[0].role:null;
+}
+// 取某角色在当前事件上的字段值（取代 e.d.X 字面量）
+function roleField(e,roleName){const r=PROFILE.roles[roleName];return r?e.d[r.field]:undefined;}
+// 取当前事件的规格（role/key/stage）
+function evSpec(e){const list=EVENT_BY_TAG[e.tag];if(!list)return null;
+  for(const ev of list){if(ev.match.field){let ok=true;for(const fk in ev.match.field){const want=ev.match.field[fk];const v=e.d[fk];
+    if(Array.isArray(want)?!want.includes(v):want!==v){ok=false;break;}}if(!ok)continue;}return ev;}
+  return list[0];}
+// 地址角色取值：通用地址索引键（默认 ADDL，支持按 roles.addr.field 切换）
+function addrOf(e){const r=PROFILE.roles.addr;const f=r&&r.field;const v=f?e.d[f]:undefined;return v===undefined?undefined:v;}
+// 就绪门控：与原生 e.d.READY!=='0' 等价（缺失字段时 !=='0' 为 true，保持原语义）
+function readyGate(e){const r=PROFILE.roles.ready;if(!r)return true;return roleField(e,'ready')!=='0';}
+// 重建事件规格索引（profile 的 events 被用户改后需调用）
+function rebuildEventIndex(){EVENT_BY_TAG={};for(const ev of PROFILE.events)if(ev.match.tag)(EVENT_BY_TAG[ev.match.tag]||(EVENT_BY_TAG[ev.match.tag]=[])).push(ev);}
+// 按当前 PROFILE 重算角色索引 + 地址索引 + 事务重建（绑定变更后调用，无需重解析文件）
+function reindexRoles(){
+  S.byRole={};for(const t of Object.keys(PROFILE.roles))S.byRole[t]=[];
+  S.byAddl=new Map();
+  for(let i=0;i<S.raw.length;i++){const e=S.raw[i];const a=addrOf(e);
+    if(a!==undefined){let arr=S.byAddl.get(a);if(!arr){arr=[];S.byAddl.set(a,arr);}arr.push(i);}
+    const r=roleOf(e);if(r)(S.byRole[r]||(S.byRole[r]=[])).push(i);}
+  buildTxns();
+}
+// profile（角色绑定 + 协议）持久化：tpv_profile.v1，必须 try/catch（见 v0.05.2 事故）
+function saveProfile(){try{localStorage.setItem(LS_PROFILE,JSON.stringify({meta:PROFILE.meta,roles:PROFILE.roles,events:PROFILE.events,txns:PROFILE.txns}));}catch(e){}}
 const PALETTE=['#4ea1ff','#35c4dc','#52d38a','#f0a03c','#b478ff','#ff6fb5','#ff4d6d','#ffd23f','#ff8c42','#7ee0c0','#c0a0ff','#ffa8a8','#8fd14f','#4dd0e1','#e59866'];
 function tagMeta(t){
   if(DICT.tags[t])return DICT.tags[t];
@@ -661,6 +751,47 @@ function tagMeta(t){
 }
 function fieldMeta(k){return DICT.fields[k]||{label:k};}
 function valLabel(tag,k,v){const m=DICT.values[tag+'.'+k];return m&&m[v]?m[v]:null;}
+/* 通用字段解码引擎（Phase 3，数据驱动、可经 profile 重绑）：
+   支持三种规格，全部写在 profile.fields[k].decode 上，取代散落的硬编码解码：
+   - {enum:{值:'含义'}}              整值 → 含义（补充/替代 valLabel 的整值映射）
+   - {bits:[{bits:[hi]|[hi,lo], name}, ...]}  位段 → 语义名（REQS/TYPE/SNOP/UNIQ/RESP 等）
+   - {kind:'size'|'len'|'cache'|'prot'}         跨字段/按位计算（AXI SIZE/LENG/CACH/PROT）
+   优先级：profile decode → 旧 valLabel 整值 → null。 */
+function decodeFieldValue(k,v,d){
+  const fm=DICT.fields[k]; if(!fm||!fm.decode||isXZ(v))return null;
+  const dec=fm.decode;
+  const radix=fm.radix===16?16:(fm.bin?2:10);
+  const n=parseInt(v,radix)>>>0; if(!isFinite(n))return null;
+  if(dec.enum!==undefined&&dec.enum[v]!==undefined)return dec.enum[v];
+  if(Array.isArray(dec.bits)){
+    const out=[];
+    for(const seg of dec.bits){
+      const arr=seg.bits; const lo=Array.isArray(arr)?arr[1]:arr[0]; const hi=Array.isArray(arr)?arr[0]:arr[0];
+      const w=hi-lo+1; const mask=w>=32?0xffffffff:((1<<w)-1); const bv=(n>>lo)&mask;
+      if(bv)out.push(seg.name+(hi>lo?('='+bv):''));
+    }
+    if(out.length)return out.join(' · ');
+  }
+  if(dec.kind==='size')return (1<<n)+' 字节/拍';
+  if(dec.kind==='len'){const sz=d&&d.SIZE!==undefined?parseInt(d.SIZE,16):NaN;
+    return isFinite(sz)?((n+1)+' 拍突发 · 共 '+((n+1)*(1<<sz))+' 字节'):((n+1)+' 拍突发');}
+  if(dec.kind==='cache'){if(n===0)return 'Device Non-bufferable';
+    const names=['Bufferable 可缓冲','Modifiable 可改写','Read-Allocate 读分配','Write-Allocate 写分配'];
+    const b=names.filter((_,i)=>(n>>i)&1);return b.join(' · ')||'—';}
+  if(dec.kind==='prot')return [(n&1)?'Privileged 特权':'Unprivileged 用户',
+    (n&2)?'Non-secure 非安全':'Secure 安全',(n&4)?'Instruction 取指':'Data 数据'].join(' · ');
+  return null;
+}
+// 由字段 decode.bits 构造「位序号 → 语义名」映射，供位渲染标注
+function bitNameMap(fm){
+  if(!fm||!fm.decode||!Array.isArray(fm.decode.bits))return null;
+  const m={};
+  for(const seg of fm.decode.bits){
+    const arr=seg.bits; const lo=Array.isArray(arr)?arr[1]:arr[0]; const hi=Array.isArray(arr)?arr[0]:arr[0];
+    for(let b=lo;b<=hi;b++)m[b]=seg.name;
+  }
+  return m;
+}
 
 /* =======================================================================
    1. 全局状态
@@ -803,13 +934,17 @@ function finish(raw,tagSet,fieldsByTag,bad,t0,onDone){
   const af=new Set();
   for(const k in fieldsByTag){S.fieldsByTag[k]=[...fieldsByTag[k]];fieldsByTag[k].forEach(x=>af.add(x));}
   S.allFields=[...af];
-  S.byTag={};S.byAddl=new Map();
+  S.byTag={};S.byAddl=new Map();S.byRole={};
   for(const t of S.tags)S.byTag[t]=[];
+  for(const t of Object.keys(PROFILE.roles))S.byRole[t]=[];
   for(let i=0;i<raw.length;i++){
     const e=raw[i];
     S.byTag[e.tag].push(i);
-    const a=e.d.ADDL;
+    // 地址索引改由 roles.addr 驱动（默认 ADDL，行为与原生一致）；支持按绑定字段切换
+    const a=addrOf(e);
     if(a!==undefined){let arr=S.byAddl.get(a);if(!arr){arr=[];S.byAddl.set(a,arr);}arr.push(i);}
+    // 角色索引：原始事件 → 通用角色，供 buildTxns 按角色而非 tag 字面量聚合
+    const r=roleOf(e); if(r){(S.byRole[r]||(S.byRole[r]=[])).push(i);}
   }
   for(const t of S.tags)S.tagOn[t]=true;
   buildTxns();
@@ -825,44 +960,46 @@ function buildTxns(){
   const T={load:[],prefetch:[],line:[],store:[]};
   // 统一收尾：保证每条事务都有 end / lat，避免 undefined 流入排序与绘制
   const seal=o=>{o.end=o.stages[o.stages.length-1].cyc;o.lat=o.end-o.start;return o;};
+  // 按角色取索引（取代 S.byTag 字面量白名单）
+  const roleIdx=r=>S.byRole[r]||[];
 
-  /* ---- Load：IID 就近配对 PIPE3 → DA → WB ----
+  /* ---- Load：id 就近配对 issue → da → wb ----
      IID 是循环复用的短标签，同一 IID 再次发射时，旧事务视为未观测到 WB（被冲刷或 trace 截断）。 */
   const pend=new Map();
-  for(let i=0;i<raw.length;i++){
-    const e=raw[i];
-    if(e.tag==='LSU_LD_PIPE3'){
-      const iid=e.d.IID;
-      if(pend.has(iid)){
-        const o=pend.get(iid);
-        if(o.stages.length>1){o.partial=1;T.load.push(seal(o));}
-      }
-      pend.set(iid,{kind:'load',key:iid,pc:e.d.PC,addl:e.d.ADDL,start:e.cyc,
-        stages:[{name:'PIPE3',cyc:e.cyc,idx:i,tag:e.tag}]});
-    }else if(e.tag==='LSU_LD_DA_fwd'){
-      const o=pend.get(e.d.IID);
-      if(o&&!o.hasDA){o.hasDA=1;o.stages.push({name:'DA',cyc:e.cyc,idx:i,tag:e.tag});if(e.d.ADDL)o.addl=e.d.ADDL;}
-    }else if(e.tag==='LSU_LD_WB_pg'){
-      const o=pend.get(e.d.IID);
-      if(o){o.stages.push({name:'WB',cyc:e.cyc,idx:i,tag:e.tag});
-        o.wbFrom=e.d.FROM;o.data=e.d.DATA;o.preg=e.d.PREG;o.done=1;
-        if(e.d.ADDL)o.addl=e.d.ADDL;
-        // L1 未命中判据：数据没走 DA 级前递，而是由回填缓冲(RB)供给
-        o.miss=(!o.hasDA||e.d.FROM==='RB')?1:0;
-        T.load.push(seal(o));pend.delete(e.d.IID);}
+  for(const i of roleIdx('demand-load-issue')){
+    const e=raw[i],k=roleField(e,'id');
+    if(pend.has(k)){
+      const o=pend.get(k);
+      if(o.stages.length>1){o.partial=1;T.load.push(seal(o));}
     }
+    pend.set(k,{kind:'load',key:k,pc:roleField(e,'pc'),addl:roleField(e,'addr'),start:e.cyc,
+      stages:[{name:evSpec(e).stage,cyc:e.cyc,idx:i,tag:e.tag}]});
+  }
+  for(const i of roleIdx('demand-load-da')){
+    const e=raw[i],o=pend.get(roleField(e,'id'));
+    if(o&&!o.hasDA){o.hasDA=1;o.stages.push({name:evSpec(e).stage,cyc:e.cyc,idx:i,tag:e.tag});if(roleField(e,'addr'))o.addl=roleField(e,'addr');}
+  }
+  for(const i of roleIdx('demand-load-wb')){
+    const e=raw[i],o=pend.get(roleField(e,'id'));
+    if(o){o.stages.push({name:evSpec(e).stage,cyc:e.cyc,idx:i,tag:e.tag});
+      o.wbFrom=roleField(e,'from');o.data=e.d.DATA;o.preg=e.d.PREG;o.done=1;
+      if(roleField(e,'addr'))o.addl=roleField(e,'addr');
+      // L1 未命中判据：数据没走 DA 级前递，而是由回填缓冲(RB)供给
+      o.miss=(!o.hasDA||roleField(e,'from')==='RB')?1:0;
+      T.load.push(seal(o));pend.delete(roleField(e,'id'));}
   }
   for(const o of pend.values())if(o.stages.length>1){o.partial=1;T.load.push(seal(o));}
   T.load.sort((a,b)=>a.start-b.start);
 
-  /* ---- 索引 ---- */
+  /* ---- 索引（按角色聚合到地址索引）---- */
   const cmpByAddl=new Map(),arByAddl=new Map(),lsuByAddl=new Map(),awByAddl=new Map();
   const push=(m,a,i)=>{if(a===undefined)return;let x=m.get(a);if(!x){x=[];m.set(a,x);}x.push(i);};
-  for(const i of (S.byTag['L2C_CMP']||[]))push(cmpByAddl,raw[i].d.ADDL,i);
-  for(const i of (S.byTag['BIU_PAD_AR']||[]))push(arByAddl,raw[i].d.ADDL,i);
-  for(const i of (S.byTag['BIU_PAD_AW']||[]))push(awByAddl,raw[i].d.ADDL,i);
-  for(const t of ['LSU_LD_PIPE3','LSU_ST_PIPE4'])for(const i of (S.byTag[t]||[]))push(lsuByAddl,raw[i].d.ADDL,i);
-  // ⚠ lsuByAddl 由多个 tag 拼接而成，拼接后不再按时间有序。
+  for(const i of roleIdx('cache-lookup'))push(cmpByAddl,addrOf(raw[i]),i);
+  for(const i of roleIdx('bus-read-addr'))push(arByAddl,addrOf(raw[i]),i);
+  for(const i of roleIdx('bus-write-addr'))push(awByAddl,addrOf(raw[i]),i);
+  for(const i of roleIdx('demand-load-issue'))push(lsuByAddl,addrOf(raw[i]),i);
+  for(const i of roleIdx('demand-store-issue'))push(lsuByAddl,addrOf(raw[i]),i);
+  // ⚠ lsuByAddl 由多个角色拼接而成，拼接后不再按时间有序。
   // seek() 依赖数组时间有序才能返回"最早的一次"，否则提前量会算错，必须显式排序。
   for(const arr of lsuByAddl.values())arr.sort((x,y)=>raw[x].cyc-raw[y].cyc||x-y);
   // 二分找第一个 cyc>=from，再线性校验窗口，避免长数组上的 O(n) 扫描
@@ -875,15 +1012,15 @@ function buildTxns(){
     return (win<0||c-from<=win)?j:-1;
   };
 
-  /* ---- Store：ST_PIPE4 →（启发式）同 ADDL 的 AXI AW ----
+  /* ---- Store：demand-store-issue →（启发式）同 addr 的 bus-write-addr ----
      注意：AW 数量远少于 Store，多条 Store 会命中同一条 AW（写合并 / 同行反复写），
      因此这只是"该 Store 之后本行发生过写出"的弱证据，不是一对一因果链。 */
-  for(const i of (S.byTag['LSU_ST_PIPE4']||[])){
-    const e=raw[i];
-    const o={kind:'store',key:e.d.IID,pc:e.d.PC,addl:e.d.ADDL,start:e.cyc,weak:1,
-      stages:[{name:'ST',cyc:e.cyc,idx:i,tag:e.tag}]};
-    const j=seek(awByAddl,e.d.ADDL,e.cyc,W.stAw);
-    if(j>=0){o.stages.push({name:'AW',cyc:raw[j].cyc,idx:j,tag:'BIU_PAD_AW'});o.awIdx=j;}
+  for(const i of roleIdx('demand-store-issue')){
+    const e=raw[i],a=addrOf(e);
+    const o={kind:'store',key:roleField(e,'id'),pc:roleField(e,'pc'),addl:a,start:e.cyc,weak:1,
+      stages:[{name:evSpec(e).stage,cyc:e.cyc,idx:i,tag:e.tag}]};
+    const j=seek(awByAddl,a,e.cyc,W.stAw);
+    if(j>=0){o.stages.push({name:evSpec(raw[j]).stage,cyc:raw[j].cyc,idx:j,tag:raw[j].tag});o.awIdx=j;}
     T.store.push(seal(o));
   }
   // 标注每条 AW 被多少 Store 认领，用于提示错配风险
@@ -891,18 +1028,18 @@ function buildTxns(){
   for(const o of T.store)if(o.awIdx!==undefined)awClaim.set(o.awIdx,(awClaim.get(o.awIdx)||0)+1);
   for(const o of T.store)if(o.awIdx!==undefined)o.awShare=awClaim.get(o.awIdx);
 
-  /* ---- Prefetch：TriPF_L2 →（READY=1 才继续）L2C_CMP → BIU_AR → 首次被 LSU 使用 ---- */
-  for(const i of (S.byTag['TriPF_L2']||[])){
-    const e=raw[i],a=e.d.ADDL;
-    const accepted=e.d.READY!=='0';
+  /* ---- Prefetch：prefetch-req →（ready 才继续）cache-lookup → bus-read-addr → 首次被使用 ---- */
+  for(const i of roleIdx('prefetch-req')){
+    const e=raw[i],a=addrOf(e);
+    const accepted=readyGate(e);
     const o={kind:'prefetch',key:a,addl:a,pc:'',start:e.cyc,accepted:accepted,
-      stages:[{name:'PF-REQ',cyc:e.cyc,idx:i,tag:e.tag}]};
+      stages:[{name:evSpec(e).stage,cyc:e.cyc,idx:i,tag:e.tag}]};
     // 被反压的请求根本没进 L2，不能把同 ADDL 的其他 L2C_CMP 算到它头上
     if(accepted){
       const c=seek(cmpByAddl,a,e.cyc,W.l2cmp);
-      if(c>=0)o.stages.push({name:'L2-CMP',cyc:raw[c].cyc,idx:c,tag:'L2C_CMP'});
+      if(c>=0)o.stages.push({name:evSpec(raw[c]).stage,cyc:raw[c].cyc,idx:c,tag:raw[c].tag});
       const r=seek(arByAddl,a,e.cyc,W.axiar);
-      if(r>=0)o.stages.push({name:'AXI-AR',cyc:raw[r].cyc,idx:r,tag:'BIU_PAD_AR'});
+      if(r>=0)o.stages.push({name:evSpec(raw[r]).stage,cyc:raw[r].cyc,idx:r,tag:raw[r].tag});
     }
     const u=seek(lsuByAddl,a,e.cyc+1,-1);
     if(u>=0){
@@ -928,7 +1065,7 @@ function buildTxns(){
     T.prefetch.push(seal(o));
   }
 
-  /* ---- 缓存行生命周期：同 ADDL 事件按间隔切段 ---- */
+  /* ---- 缓存行生命周期：同 addr 事件按间隔切段 ---- */
   const GAP=W.lineGap;
   for(const [a,arr] of S.byAddl){
     if(arr.length<2)continue;
@@ -937,7 +1074,7 @@ function buildTxns(){
       const e=raw[i];
       if(!cur||e.cyc-cur.end>GAP){
         if(cur&&cur.stages.length>1)T.line.push(cur);
-        cur={kind:'line',key:a,addl:a,pc:e.d.PC||'',start:e.cyc,end:e.cyc,stages:[]};
+        cur={kind:'line',key:a,addl:a,pc:roleField(e,'pc')||'',start:e.cyc,end:e.cyc,stages:[]};
       }
       cur.stages.push({name:tagMeta(e.tag).stage,cyc:e.cyc,idx:i,tag:e.tag});
       cur.end=e.cyc;
@@ -1817,23 +1954,26 @@ function selectEvent(i,scroll=true){
     const v=e.d[k];
     const xz=isXZ(v);
     const vl=xz?null:valLabel(e.tag,k,v);
+    const dec=decodeFieldValue(k,v,e.d);
     h+='<tr><td title="'+(fm.label||k)+'">'+k+'</td><td><b'+(xz?' style="color:#ff5f6d"':'')+'>'+v+'</b>';
     if(xz)h+=' <span style="color:#ff5f6d;font-size:10px">⚠ 未定义态</span>';
     if(vl)h+=' <span style="color:var(--acc2)">'+vl+'</span>';
-    const ax=axiCalc(e.tag,k,v,e.d);
+    const ax=dec||axiCalc(e.tag,k,v,e.d);
     if(ax)h+=' <span style="color:var(--acc2)">'+ax+'</span>';
     if(fm.label&&fm.label!==k)h+='<div style="color:var(--fg3);font-size:10px">'+fm.label+'</div>';
     if(fm.hex&&!xz){const n=parseInt(v,16);if(isFinite(n))h+='<div style="color:var(--fg3);font-size:10px">十进制 '+fmt(n)+'</div>';}
     if((fm.bits||fm.bin||fm.onehot)&&!xz){
       const bits=fm.bin?v.split(''):(parseInt(v,16)>>>0).toString(2).padStart(Math.max(4,v.length*4),'0').split('');
+      const bitName=bitNameMap(fm);
       h+='<div class="bits">';
       for(let bi=0;bi<bits.length;bi++){
         const b=bits[bi]==='1';
-        h+='<span class="bit '+(b?'one':'zero')+'" title="bit'+(bits.length-1-bi)+'">'+bits[bi]+'</span>';
+        const nm=bitName?bitName[bits.length-1-bi]:null;
+        h+='<span class="bit '+(b?'one':'zero')+'" title="bit'+(bits.length-1-bi)+(nm?(' · '+nm):'')+'">'+bits[bi]+'</span>';
       }
       h+='</div>';
       const set=[];
-      for(let bi=0;bi<bits.length;bi++)if(bits[bi]==='1')set.push('bit'+(bits.length-1-bi));
+      for(let bi=0;bi<bits.length;bi++)if(bits[bi]==='1'){const idx=bits.length-1-bi;set.push('bit'+idx+(bitName&&bitName[idx]?('('+bitName[idx]+')'):''));}
       if(set.length)h+='<div style="color:var(--acc2);font-size:10px">置位：'+set.join(', ')+'</div>';
     }
     h+='</td></tr>';
@@ -3619,6 +3759,12 @@ function bind(){
 
   /* ---- 关于 / 开发报告 / 更新记录 ---- */
   const CHANGELOG=[
+    {v:'0.07.0',date:'2025-08-12',items:[
+      '【通用化框架·起步】新增 PROFILE 角色绑定层：将「原始 trace 标签/字段」与「预设通用访存事件（demand-load-issue/da/wb、demand-store-issue、prefetch-req、cache-lookup、bus-read-addr、bus-write-addr 等）」彻底解耦。用户只需在语义字典页（或导入 JSON）把标签/字段绑定到通用事件，标签编码变化后重绑即可复用全部分析逻辑，无需改代码',
+      '【通用化框架·起步】buildTxns()/finish() 重写为 PROFILE 驱动：事务组装（load/store/prefetch/line）不再硬编码 9 个标签 + 7 个字段，改为由 PROFILE.roles（addr/id/pc/from/ready 抽象）+ PROFILE.events（match→role 映射）+ PROFILE.txns（stages/key/link 定义）计算；对 openC910 默认 profile 输出与旧版逐字节一致（21/21 测试通过）',
+      '【字段解码引擎】新增 decodeFieldValue() 数据驱动解码，取代散落的 axiCalc + valLabel 字面量匹配：支持 enum 字典、bits 段位按语义命名（如 bit12=read）、size/len/cache/prot 计算型解码；详情面板字段渲染优先用解码引擎，并按位显示语义名（如 bit12(read)）',
+      '【持久化】PROFILE 支持 localStorage（自动恢复 roles/events/txns/meta）+ 内置 openC910 默认 profile（LS 读取失败时回退），为后续「语义字典页绑定 UI + JSON 导入导出」打基础'
+    ]},
     {v:'0.06.10',date:'2025-08-10',items:[
       '【修复】关于弹窗无法关闭（缺陷）：renderAbout() 用 innerHTML 注入更新记录时未转义，v0.06.7 条目中字面量文本「可见 <canvas> 以 drawImage…」被浏览器解析成真实的全屏 <canvas> 元素，盖在关闭按钮之上拦截所有点击。改为注入前对每条目做 HTML 转义（&/</>/”），弹窗内容不再含任何真实 canvas/svg，关闭按钮恢复可点',
       '【修复】初始页打开关于后遮挡 / 层次错乱（缺陷）：#loader 与 .modal 原同为 z-index:50，在尚未加载 trace 的初始页 loader 后绘制盖住弹窗；同时 .modal(50) 低于 header(60) 与 #tip(200)。调整为 .modal→100、#tip→90（保留 pointer-events:none），形成 弹窗(100) > 悬浮提示(90) > 加载遮罩/顶栏(50/60) 的正确层次，弹窗始终置顶',
@@ -3754,7 +3900,7 @@ function bind(){
     const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.06.10</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.07.0</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'

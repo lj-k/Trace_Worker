@@ -12,7 +12,7 @@ const errs=[];
 page.on('pageerror',e=>errs.push('PAGEERR: '+(e.stack||e.message)));
 page.on('console',m=>{ if(m.type()==='error') errs.push('CONSOLE: '+m.text()); });
 
-const suite=new Suite('trace-pipeline-viewer 前端完整回归（v0.06.10）');
+const suite=new Suite('trace-pipeline-viewer 前端完整回归（v0.07.0）');
 
 // 加载 trace
 await page.goto('file://'+HTML); await page.waitForTimeout(150);
