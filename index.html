@@ -277,7 +277,7 @@ table.st td.num{text-align:right}
     <span class="ver" id="verTag" title="版本 0.07.0 · 作者 konglingjun">v0.07.0</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
-  <button class="btn" id="btnOpen">📂 打开 Trace</button>
+  <button class="btn" id="btnOpen">📂 打开本地Trace</button>
   <button class="btn" id="btnSamples" title="列出示例 Trace（example 目录下的 .txt）并选择打开">📁 示例 Trace</button>
   <div class="hsep"></div>
   <div class="tabs" id="tabs">
@@ -522,6 +522,7 @@ table.st td.num{text-align:right}
         <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
           <button class="btn primary" id="btnPick" title="通过系统文件选择器加载单个 Trace 文件">选择 Trace 文件</button>
           <button class="btn" id="btnFolder" title="选择整个文件夹，自动挑首个 trace 文件加载">选择 Trace 文件夹</button>
+          <button class="btn" id="btnSamples2" title="列出示例 Trace（example 目录下的 .txt）并选择打开">📁 示例 Trace</button>
         </div>
         <input type="file" id="filePick" accept=".txt,.log,.trace,.csv" class="hideinput">
         <input type="file" id="folderPick" webkitdirectory directory multiple class="hideinput">
@@ -542,7 +543,7 @@ table.st td.num{text-align:right}
   302350000;LSU_LD_PIPE3;PC:19d8;PREG:02;ADDL:00000034c0;IID:0a;
   106550000;L2C_CMP;ADDL:0000000000;TYPE:1000;RESP:00001;STAL:0;
 
-内置 openC910 / Triverse 预取器语义，其余事件类型自动泛化处理。</div>
+内置 openC910 / 预取器语义，其余事件类型自动泛化处理。</div>
         <div id="prog"><div class="pbar"><i id="pbarI"></i></div><div id="ptext">准备中…</div></div>
         <div id="loadErr"></div>
       </div>
@@ -577,8 +578,8 @@ const BUILTIN = {
     LSU_LD_WB_pg :{label:'LSU 取数·写回',   group:'CORE / LSU', color:'#52d38a', stage:'WB',    desc:'数据写回物理寄存器。FROM=DA 表示由 DA 级直接前递，FROM=RB 表示来自回填缓冲。'},
     LSU_ST_PIPE4 :{label:'LSU 存数·发射',   group:'CORE / LSU', color:'#f0a03c', stage:'ST',    desc:'Store 指令进入 LSU 流水线。CODE 为指令编码，SDIQ 为存数据队列表项 one-hot。'},
     L2C_CMP      :{label:'L2 Cache 比较级', group:'L2 CACHE',   color:'#b478ff', stage:'L2',    desc:'L2 Cache 流水线比较（tag compare）级。TYPE 为请求类型位向量，RESP 为响应位向量，STAL=1 表示该拍被阻塞。'},
-    L2_TriPF     :{label:'L2 → 预取器 训练',group:'PREFETCH',   color:'#ff6fb5', stage:'TRAIN', desc:'L2 把访存事件送给 Triverse 预取器做训练。REQS 为训练请求属性位向量。'},
-    TriPF_L2     :{label:'预取器 → L2 请求',group:'PREFETCH',   color:'#ff4d6d', stage:'PFREQ', desc:'Triverse 预取器向 L2 发出预取请求。READY=0 表示 L2 反压未接收。'},
+    L2_TriPF     :{label:'L2 → 预取器 训练',group:'PREFETCH',   color:'#ff6fb5', stage:'TRAIN', desc:'L2 把访存事件送给  预取器做训练。REQS 为训练请求属性位向量。'},
+    TriPF_L2     :{label:'预取器 → L2 请求',group:'PREFETCH',   color:'#ff4d6d', stage:'PFREQ', desc:' 预取器向 L2 发出预取请求。READY=0 表示 L2 反压未接收。'},
     BIU_PAD_AR   :{label:'AXI 读地址通道',  group:'BIU / AXI',  color:'#ffd23f', stage:'AR',    desc:'BIU 在 PAD 上发出 AXI 读地址。LENG=突发长度-1，SIZE=log2(字节数)，ARID 为事务 ID。'},
     BIU_PAD_AW   :{label:'AXI 写地址通道',  group:'BIU / AXI',  color:'#ff8c42', stage:'AW',    desc:'BIU 在 PAD 上发出 AXI 写地址。UNIQ/SNOP 与一致性域相关。'}
   },
@@ -685,7 +686,7 @@ try{const s=localStorage.getItem(LS_KEY);if(s){const o=JSON.parse(s);
 const LS_PROFILE='tpv_profile.v1';
 const BUILTIN_PROFILE={
   meta:{name:'openC910 (内置默认)', protocol:{bus:'AXI4', version:'openC910'},
-        note:'openC910 / Triverse 预取器 trace 的内置默认绑定方案'},
+        note:'openC910 / 预取器 trace 的内置默认绑定方案'},
   // 字段角色：把「地址 / 指令ID / PC / 来源通道 / 就绪门控」抽象为角色，
   // 取代散落在 buildTxns 各处的 e.d.ADDL / e.d.IID / e.d.PC / e.d.FROM / e.d.READY 字面量。
   roles:{
@@ -2243,7 +2244,7 @@ function statsRender(){
     const inL2=pfs.filter(o=>o.stages.some(s=>s.name==='L2-CMP')).length;
     const inAR=pfs.filter(o=>o.stages.some(s=>s.name==='AXI-AR')).length;
     const never=pfs.length-pfs.filter(o=>o.usedLater).length;
-    h+='<div class="panel"><h4>Triverse 预取器效果分析</h4>'
+    h+='<div class="panel"><h4> 预取器效果分析</h4>'
       +'<div class="hint">按 ADDL 追踪每条预取请求的去向。请注意：除 READY 外，后续阶段都是'
       +'<b style="color:var(--warn)">按地址+时间邻近推断</b>的启发式关联，窗口取值见侧栏「关联窗口」，'
       +'结论对窗口敏感，务必结合 RTL 语义判读。</div>';
@@ -2465,7 +2466,7 @@ function statsRender(){
    ======================================================================= */
 function dictRender(){
   let h='';
-  h+='<div class="note"><b>说明：</b>内置语义基于 openC910 / Triverse 预取器的常见命名做了推断标注，'
+  h+='<div class="note"><b>说明：</b>内置语义基于 openC910 /  预取器的常见命名做了推断标注，'
     +'其中位域含义（如 <code>L2C_CMP.TYPE</code>、<code>REQS</code>）需要对照你的 RTL 编码确认。'
     +'在这里改好的标签会保存在浏览器本地，下次打开自动生效，也可以导出成 JSON 在团队里共享。</div>';
   h+='<div style="display:flex;gap:8px;margin-bottom:14px">'
@@ -3729,7 +3730,7 @@ function bind(){
   // 修复：加载页（#loader）默认全屏覆盖整个主舞台，未加载 trace 前会拦截所有
   // 视图内按钮与画布的点击，表现为"界面按钮都没反应"。改为点击遮罩任意位置即触发文件选择。
   $('loader').addEventListener('click',e=>{
-    if(e.target.id!=='btnPick'&&e.target.id!=='filePick'&&e.target.id!=='btnFolder'&&e.target.id!=='folderPick')$('filePick').click();
+    if(e.target.id!=='btnPick'&&e.target.id!=='filePick'&&e.target.id!=='btnFolder'&&e.target.id!=='folderPick'&&e.target.id!=='btnSamples2'&&e.target.id!=='btnSamples')$('filePick').click();
   });
   $('filePick').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);};
   $('folderPick').onchange=()=>{
@@ -4030,7 +4031,8 @@ function bind(){
       })
       .catch(err=>{$('samplesMsg').textContent='加载失败：'+(err&&err.message||err);});
   }
-  $('btnSamples').onclick=openSamples;
+  $('btnSamples').onclick=e=>{e.stopPropagation();openSamples();};
+  $('btnSamples2').onclick=e=>{e.stopPropagation();openSamples();};
   $('samplesClose').onclick=closeSamples;
   $('samplesModal').addEventListener('click',e=>{if(e.target===$('samplesModal'))closeSamples();});
   $('btnCsv').onclick=exportCsv;
