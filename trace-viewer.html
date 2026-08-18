@@ -1,0 +1,3244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Memory Trace Pipeline Viewer</title>
+<meta name="version" content="1.1.2">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234da3ff'/%3E%3Cpath d='M8 10h4v12H8zm6 0h4v12h-4zm6 0h4v12h-4z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+/* ============================================================
+   Memory Trace Pipeline Viewer — stylesheet (v1.1)
+   refined dark design system: cohesive palette, soft depth,
+   consistent typography & spacing, RTL-engineer friendly
+   ============================================================ */
+:root{
+  /* surfaces */
+  --bg:      #0b0f17;
+  --bg1:     #111826;
+  --bg2:     #161f30;
+  --bg3:     #1c2536;
+  --bg4:     #222d42;
+  --line:    #243049;
+  --line2:   #2f3d59;
+  --line3:   #3b4d6e;
+  /* text */
+  --fg:      #dde4f1;
+  --fg2:     #98a6be;
+  --fg3:     #61708a;
+  /* accents */
+  --acc:     #4f9dff;
+  --acc-d:   #2f7fe0;
+  --acc2:    #9b7bff;
+  --acc-g:   linear-gradient(135deg,#4f9dff,#9b7bff);
+  --ok:      #34d399;
+  --warn:    #ffb454;
+  --err:     #ff5d6c;
+  --pf:      #ff7ac6;
+  /* type */
+  --mono: "JetBrains Mono","Fira Code",ui-monospace,Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --ui:   -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --r:    9px;
+  --r-s:  6px;
+  --sh:   0 10px 30px #0008;
+  --h-top: 48px;
+  --w-side: 256px;
+  --w-detail: 340px;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:
+    radial-gradient(1200px 620px at 78% -12%, #15233c 0%, transparent 60%),
+    radial-gradient(900px 520px at -8% 108%, #1a1733 0%, transparent 55%),
+    var(--bg);
+  color:var(--fg);font-family:var(--ui);font-size:13px;line-height:1.5;
+  overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+::selection{background:#2d6bd333}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#2c3a55;border:2px solid transparent;background-clip:padding-box;border-radius:8px}
+::-webkit-scrollbar-thumb:hover{background:#3c4f73;background-clip:padding-box}
+
+/* ---------- generic controls ---------- */
+.btn{
+  background:linear-gradient(180deg,var(--bg3),var(--bg2));
+  border:1px solid var(--line2);color:var(--fg);
+  padding:6px 12px;border-radius:var(--r-s);cursor:pointer;white-space:nowrap;
+  transition:.14s ease;display:inline-flex;align-items:center;gap:6px;line-height:1.2;font-weight:500;
+  box-shadow:0 1px 0 #0003 inset;
+}
+.btn:hover{border-color:var(--line3);background:linear-gradient(180deg,#243149,#1b2538);transform:translateY(-1px)}
+.btn:active{transform:translateY(0);box-shadow:0 1px 4px #0006 inset}
+.btn.pri{background:var(--acc-g);border-color:transparent;color:#fff;font-weight:600;
+  box-shadow:0 2px 10px #4f9dff44}
+.btn.pri:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.btn.on{background:#13312a;border-color:var(--ok);color:#8ff0bd;box-shadow:0 0 0 1px #34d39955 inset}
+.btn.rec{background:#34121d;border-color:var(--err);color:#ff9aa4}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn.sm{padding:4px 9px;font-size:11.5px;border-radius:var(--r-s)}
+.btn.icon{padding:6px 9px}
+select,input[type=text],input[type=number]{
+  background:var(--bg1);border:1px solid var(--line2);border-radius:var(--r-s);
+  padding:6px 9px;outline:none;transition:.14s;
+}
+select:hover,input:hover{border-color:var(--line3)}
+select:focus,input:focus{border-color:var(--acc);box-shadow:0 0 0 3px #4f9dff22}
+input[type=range]{accent-color:var(--acc);height:16px}
+label.ck{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
+input[type=checkbox]{accent-color:var(--acc);cursor:pointer;width:15px;height:15px}
+.mono{font-family:var(--mono)}
+.muted{color:var(--fg2)}
+.dim{color:var(--fg3)}
+.sep{width:1px;height:24px;background:var(--line2);margin:0 4px;flex:none}
+.grow{flex:1}
+.pill{
+  display:inline-flex;align-items:center;padding:1px 8px;border-radius:20px;font-size:11px;
+  font-family:var(--mono);border:1px solid var(--line2);background:var(--bg2);color:var(--fg2);
+}
+.ver{
+  margin-left:7px;align-self:center;font-family:var(--mono);font-size:10.5px;font-weight:700;
+  color:var(--acc);background:#4f9dff1a;border:1px solid #4f9dff44;border-radius:20px;padding:1px 8px;
+  letter-spacing:.4px;
+}
+
+/* ---------- shell ---------- */
+#app{display:flex;flex-direction:column;height:100vh}
+#top{
+  height:var(--h-top);flex:none;display:flex;align-items:center;gap:9px;padding:0 14px;
+  background:linear-gradient(180deg,#101826,#0c121d);border-bottom:1px solid var(--line);
+  box-shadow:0 4px 16px #0006;z-index:30;position:relative;
+}
+#top::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;
+  background:linear-gradient(90deg,transparent,var(--acc),var(--acc2),transparent);opacity:.5}
+#logo{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.3px;white-space:nowrap}
+#logo .lg{
+  width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:14px;
+  background:var(--acc-g);color:#fff;box-shadow:0 2px 10px #4f9dff55;
+}
+#logo small{font-weight:400;color:var(--fg3);font-size:10.5px;letter-spacing:0;margin-top:1px}
+#mid{flex:1;display:flex;min-height:0}
+#side{
+  width:var(--w-side);flex:none;background:linear-gradient(180deg,var(--bg1),#0d1420);
+  border-right:1px solid var(--line);overflow-y:auto;overflow-x:hidden;
+}
+#side.hide{display:none}
+#main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative;
+  background:linear-gradient(180deg,#0c111b,#0a0e16)}
+#detail{
+  width:var(--w-detail);flex:none;background:linear-gradient(180deg,var(--bg1),#0d1420);
+  border-left:1px solid var(--line);overflow-y:auto;padding:12px
+}
+#detail.hide{display:none}
+
+/* ---------- sidebar ---------- */
+.grp{border-bottom:1px solid var(--line)}
+.grp>h4{
+  margin:0;padding:9px 13px;font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--fg3);cursor:pointer;display:flex;align-items:center;gap:7px;user-select:none;font-weight:700;
+  transition:.14s;
+}
+.grp>h4:hover{color:var(--fg2);background:#141d2c}
+.grp>h4 .cv{transition:.15s;font-size:9px;color:var(--fg3)}
+.grp.col>h4 .cv{transform:rotate(-90deg)}
+.grp.col>.bd{display:none}
+.grp>h4 .cnt{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--acc)}
+.bd{padding:5px 13px 13px}
+.row{display:flex;align-items:center;gap:8px;margin:7px 0}
+.row>span:first-child{color:var(--fg2);min-width:64px;font-size:12px}
+.row input[type=text],.row input[type=number],.row select{flex:1;min-width:0}
+
+.tagrow{
+  display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:var(--r-s);cursor:pointer;
+  font-family:var(--mono);font-size:11.5px;transition:.12s;
+}
+.tagrow:hover{background:var(--bg3)}
+.tagrow .sw{width:11px;height:11px;border-radius:3px;flex:none;box-shadow:0 0 0 1px #0006 inset}
+.tagrow .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tagrow .n{color:var(--fg3);font-size:10.5px}
+.tagrow.off{opacity:.38}
+.tagrow.off .nm{text-decoration:line-through}
+
+.stat{display:flex;justify-content:space-between;gap:8px;padding:3px 0;font-size:12px}
+.stat b{font-family:var(--mono);font-weight:600;color:var(--fg)}
+.stat .dim, .stat .muted{font-weight:400}
+.bar{height:4px;background:var(--bg3);border-radius:3px;overflow:hidden;margin-top:3px}
+.bar>i{display:block;height:100%;background:var(--acc-g)}
+
+/* ---------- tabs ---------- */
+#tabs{
+  height:36px;flex:none;display:flex;align-items:flex-end;gap:3px;padding:0 10px;
+  background:linear-gradient(180deg,#0e1521,#0b111b);border-bottom:1px solid var(--line);
+}
+.tab{
+  padding:7px 15px;border-radius:8px 8px 0 0;cursor:pointer;color:var(--fg2);font-size:12.5px;
+  border:1px solid transparent;border-bottom:none;position:relative;top:1px;white-space:nowrap;transition:.14s;
+}
+.tab:hover{color:var(--fg);background:#141d2c}
+.tab.on{background:linear-gradient(180deg,var(--bg2),#0c121d);color:var(--fg);border-color:var(--line);font-weight:600;
+  box-shadow:0 -2px 0 var(--acc) inset}
+#panes{flex:1;position:relative;min-height:0}
+.pane{position:absolute;inset:0;display:none;flex-direction:column;min-height:0}
+.pane.on{display:flex}
+
+/* ---------- canvas views ---------- */
+.vtool{
+  flex:none;display:flex;align-items:center;gap:9px;padding:7px 12px;
+  background:linear-gradient(180deg,#0e1521,#0b111b);border-bottom:1px solid var(--line);
+  flex-wrap:wrap;min-height:38px;
+}
+.vtool .lb{color:var(--fg3);font-size:11px}
+.cvwrap{flex:1;position:relative;min-height:0;overflow:hidden;background:#080c13}
+.cvwrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+canvas.hit{pointer-events:none}
+#ovwrap{height:68px;flex:none;position:relative;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#0a0f18,#070b11)}
+
+.tip{
+  position:fixed;z-index:9999;pointer-events:none;background:#0b1220f5;border:1px solid var(--line3);
+  border-radius:9px;padding:8px 11px;font-family:var(--mono);font-size:11.5px;max-width:440px;
+  box-shadow:var(--sh);display:none;line-height:1.55;backdrop-filter:blur(4px)
+}
+.tip b{color:var(--acc)}
+.tip .k{color:var(--fg3)}
+.tip table{border-collapse:collapse}
+.tip td{padding:0 6px 0 0;vertical-align:top}
+
+/* ---------- tables ---------- */
+.tblwrap{flex:1;overflow:auto;min-height:0;position:relative}
+table.gr{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:11.5px}
+table.gr th{
+  position:sticky;top:0;z-index:2;background:#141d2e;color:var(--fg2);text-align:left;
+  padding:7px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;cursor:pointer;font-weight:600;
+}
+table.gr th:hover{background:#1b2638;color:var(--fg)}
+table.gr th .ar{color:var(--acc);font-size:9px;margin-left:3px}
+table.gr td{padding:4px 10px;border-bottom:1px solid #161f30}
+table.gr tbody tr:hover{background:#142031}
+table.gr tbody tr.sel{background:#16335a !important;box-shadow:inset 2px 0 0 var(--acc)}
+table.gr tbody tr{cursor:pointer}
+.vtable{position:relative}
+.vtable .spacer{width:1px}
+
+/* ---------- detail panel ---------- */
+#detail h3{margin:2px 0 11px;font-size:13.5px;display:flex;align-items:center;gap:8px}
+.dfield{
+  display:grid;grid-template-columns:84px 1fr;gap:6px;padding:4px 7px;border-radius:var(--r-s);
+  font-family:var(--mono);font-size:11.5px;align-items:baseline;
+}
+.dfield:nth-child(odd){background:#121a28}
+.dfield .k{color:var(--fg3)}
+.dfield .v{color:var(--fg);word-break:break-all}
+.dfield .v em{font-style:normal;color:var(--warn);font-size:10.5px;margin-left:6px}
+.dsec{margin:15px 0 6px;color:var(--acc);font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;
+  border-bottom:1px solid var(--line);padding-bottom:4px;font-weight:700}
+.chain{display:flex;flex-direction:column;gap:0}
+.chain .ci{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:var(--r-s);cursor:pointer;font-family:var(--mono);font-size:11px;transition:.12s}
+.chain .ci:hover{background:var(--bg3)}
+.chain .ci.cur{background:#16335a;box-shadow:inset 2px 0 0 var(--acc)}
+.chain .ci .sw{width:8px;height:8px;border-radius:50%;flex:none}
+.chain .ci .t{color:var(--fg3);font-size:10px;min-width:74px;text-align:right}
+.chain .arrow{margin-left:12px;color:var(--fg3);font-size:9px;line-height:.9;height:9px}
+
+/* ---------- status ---------- */
+#status{
+  height:26px;flex:none;display:flex;align-items:center;gap:12px;padding:0 13px;font-size:11px;
+  background:linear-gradient(180deg,#0a0f18,#080c13);border-top:1px solid var(--line);
+  color:var(--fg3);font-family:var(--mono);
+}
+#status .it{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--fg3);flex:none;box-shadow:0 0 0 3px #ffffff10}
+.dot.live{background:var(--ok);animation:pulse 1.4s infinite}
+.dot.err{background:var(--err)}
+.dot.pause{background:var(--warn)}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 #34d39999}50%{opacity:.55;box-shadow:0 0 0 6px #34d39900}}
+
+/* ---------- drop / welcome ---------- */
+#drop{
+  position:absolute;inset:0;z-index:200;display:none;place-items:center;
+  background:#0b0f17e8;backdrop-filter:blur(5px)
+}
+#drop.on{display:grid}
+#drop .bx{
+  border:2px dashed var(--acc);border-radius:18px;padding:48px 70px;text-align:center;
+  background:#111a28cc;box-shadow:0 0 70px #4f9dff33;animation:pop .2s ease;
+}
+#drop .bx .ic{font-size:42px;margin-bottom:12px}
+@keyframes pop{from{transform:scale(.96);opacity:.6}to{transform:scale(1);opacity:1}}
+#drop .bx{transition:.2s}
+#drop .bx:hover{border-color:var(--acc2);box-shadow:0 0 80px #9b7bff44}
+#welcome{
+  position:absolute;inset:0;z-index:20;display:grid;place-items:center;overflow:auto;
+  background:radial-gradient(1100px 560px at 50% -14%,#16233a 0%,transparent 62%),#0a0e16;
+}
+#welcome.hide{display:none}
+.wc{max-width:920px;padding:40px;text-align:center}
+.wc h1{font-size:27px;margin:0 0 10px;font-weight:700;letter-spacing:.2px}
+.wc h1 span{background:var(--acc-g);-webkit-background-clip:text;background-clip:text;color:transparent}
+.wc p{color:var(--fg2);margin:0 auto 26px;line-height:1.8;max-width:680px}
+.wgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:26px 0}
+.wcard{
+  background:linear-gradient(180deg,var(--bg1),var(--bg2));border:1px solid var(--line);border-radius:14px;
+  padding:18px;text-align:left;cursor:pointer;transition:.18s;position:relative;overflow:hidden;
+}
+.wcard::before{content:"";position:absolute;inset:0 auto auto 0;width:100%;height:2px;
+  background:var(--acc-g);opacity:0;transition:.18s}
+.wcard:hover{border-color:var(--acc);background:linear-gradient(180deg,#142032,#101826);transform:translateY(-3px);box-shadow:var(--sh)}
+.wcard:hover::before{opacity:1}
+.wcard .ic{font-size:21px;margin-bottom:9px;filter:drop-shadow(0 2px 6px #0006)}
+.wcard b{display:block;margin-bottom:6px;font-size:13.5px}
+.wcard span{color:var(--fg2);font-size:11.5px;line-height:1.65;display:block}
+.wnote{
+  text-align:left;background:linear-gradient(180deg,#0f1726,#0c1320);border:1px solid var(--line);
+  border-left:3px solid var(--warn);border-radius:10px;padding:13px 16px;color:var(--fg2);
+  font-size:11.5px;line-height:1.8;
+}
+.wnote code{background:#1b2534;padding:2px 7px;border-radius:5px;font-family:var(--mono);color:var(--warn)}
+
+/* ---------- modal ---------- */
+.modal{position:fixed;inset:0;z-index:500;display:none;place-items:center;background:#05080ccc;backdrop-filter:blur(4px)}
+.modal.on{display:grid;animation:fade .15s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.modal .box{
+  background:linear-gradient(180deg,var(--bg2),var(--bg1));border:1px solid var(--line2);border-radius:14px;
+  width:min(780px,93vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:var(--sh);
+  animation:rise .18s ease;
+}
+@keyframes rise{from{transform:translateY(10px);opacity:.7}to{transform:translateY(0);opacity:1}}
+.modal .hd{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;font-weight:700;font-size:14px}
+.modal .bdy{padding:16px 18px;overflow:auto}
+.modal .ft{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:9px;justify-content:flex-end}
+.modal textarea{
+  width:100%;height:340px;background:#080c13;border:1px solid var(--line2);border-radius:9px;padding:12px;
+  font-family:var(--mono);font-size:11.5px;resize:vertical;line-height:1.6;color:var(--fg);outline:none;
+  box-shadow:0 1px 0 #0004 inset;
+}
+.modal textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px #4f9dff22}
+.help{font-size:12px;line-height:1.85;color:var(--fg2)}
+.help h5{color:var(--fg);margin:16px 0 6px;font-size:12.5px}
+.help code{background:#1b2534;padding:1.5px 7px;border-radius:5px;font-family:var(--mono);color:var(--warn);font-size:11px}
+.help kbd{
+  background:#222c3d;border:1px solid #3a4a66;border-bottom-width:2px;border-radius:5px;padding:.5px 7px;
+  font-family:var(--mono);font-size:10.5px;color:var(--fg);
+}
+.help table{border-collapse:collapse;width:100%;margin:8px 0;font-size:11.5px}
+.help td,.help th{border:1px solid var(--line);padding:5px 10px;text-align:left}
+.help th{background:var(--bg2);color:var(--fg2)}
+
+/* ---------- about / changelog ---------- */
+.aboutp{color:var(--fg2);font-size:12.5px;line-height:1.8;margin:0 0 4px}
+.aboutp code{background:#1b2534;padding:1.5px 7px;border-radius:5px;font-family:var(--mono);color:var(--warn);font-size:11px}
+#changelog{display:flex;flex-direction:column;gap:14px;margin-top:10px}
+.rel{border:1px solid var(--line);border-radius:11px;padding:12px 14px;background:linear-gradient(180deg,var(--bg2),var(--bg1))}
+.relh{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.rv{font-family:var(--mono);font-weight:700;font-size:13px;color:var(--acc);
+  background:#4f9dff1a;border:1px solid #4f9dff44;border-radius:6px;padding:1px 9px}
+.rd{font-family:var(--mono);font-size:11px;color:var(--fg3)}
+.rel ul{margin:0;padding-left:18px;color:var(--fg2);font-size:12px;line-height:1.7}
+.rel ul li{margin:2px 0}
+
+/* ---------- analytics ---------- */
+.an{padding:16px;overflow:auto;flex:1;min-height:0}
+.angrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.card{background:linear-gradient(180deg,var(--bg2),var(--bg1));border:1px solid var(--line);border-radius:12px;padding:14px 16px;transition:.16s}
+.card:hover{border-color:var(--line3);box-shadow:0 6px 22px #0005}
+.card h5{margin:0 0 11px;font-size:12px;color:var(--fg2);display:flex;align-items:center;gap:8px;font-weight:700}
+.card h5 .hint{margin-left:auto;font-weight:400;font-size:10px;color:var(--fg3);cursor:help}
+.kpi{display:flex;align-items:baseline;gap:8px;margin:6px 0}
+.kpi .v{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--fg)}
+.kpi .u{color:var(--fg3);font-size:11px}
+.kpi .l{color:var(--fg2);font-size:11.5px;margin-left:auto}
+.hbar{display:flex;align-items:center;gap:9px;margin:4px 0;font-family:var(--mono);font-size:11px}
+.hbar .lbl{width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg2);flex:none}
+.hbar .tr{flex:1;height:14px;background:var(--bg3);border-radius:4px;overflow:hidden;position:relative}
+.hbar .tr>i{display:block;height:100%;border-radius:4px;background:var(--acc-g)}
+.hbar .vv{width:78px;text-align:right;color:var(--fg2);flex:none}
+.spark{width:100%;height:58px;display:block}
+.empty{color:var(--fg3);text-align:center;padding:28px;font-size:12px}
+.leg{display:flex;gap:13px;flex-wrap:wrap;font-size:11px;color:var(--fg2);align-items:center}
+.leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
+
+/* ======================= FOLLOW BANNER ======================= */
+.follow-banner{
+  display:none;
+  align-items:center;gap:11px;
+  padding:8px 14px;
+  background:linear-gradient(90deg,rgba(79,157,255,.16),rgba(155,123,255,.10));
+  border-bottom:1px solid var(--line2);
+  color:var(--fg);font-size:12.5px;
+}
+.follow-banner.on{display:flex;animation:fbIn .25s ease}
+.follow-banner .ic{font-size:15px;filter:drop-shadow(0 0 6px rgba(79,157,255,.6))}
+.follow-banner.semi{background:linear-gradient(90deg,rgba(255,180,84,.15),rgba(255,123,198,.08));border-bottom-color:#5a4524}
+.follow-banner .ftxt{flex:1;min-width:0;line-height:1.5}
+.follow-banner .ftxt b{color:var(--acc);margin-right:7px;white-space:nowrap}
+.follow-banner.semi .ftxt b{color:var(--warn)}
+.follow-banner .ftxt span{color:var(--fg2)}
+.follow-banner code{font-family:var(--mono);background:var(--bg3);padding:1px 5px;border-radius:4px;color:var(--fg);font-size:11px}
+.follow-banner b>code,.follow-banner .ftxt b+span code{color:var(--warn)}
+.follow-banner .fbtns{display:flex;gap:6px;flex:none}
+.follow-banner .fbtns .btn{height:27px;font-size:11.5px}
+@keyframes fbIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ======================= TOP BAR ======================= -->
+  <div id="top">
+    <div id="logo">
+      <div class="lg">⛓</div>
+      <div>Trace Pipeline Viewer<br><small>CPU memory-access trace · live follow</small></div>
+      <span class="ver" id="verBadge" title="版本号">v—</span>
+    </div>
+    <div class="sep"></div>
+    <button class="btn pri" id="bOpenLive" title="以只读方式跟进 trace：localhost 下自动增量；file:// 下每 4 秒提示重新选择文件以追加新行">📡 打开并实时跟进</button>
+    <button class="btn" id="bOpenFile" title="一次性载入文件做离线分析">📂 载入文件</button>
+    <button class="btn" id="bOpenUrl" title="通过 HTTP Range 轮询远端/本地服务器上的 trace">🌐 URL</button>
+    <div class="sep"></div>
+    <button class="btn" id="bLive" disabled title="暂停 / 继续 实时跟进">⏸ 暂停</button>
+    <label class="ck" style="margin-left:2px" title="视图自动滚动到最新时间"><input type="checkbox" id="ckFollow" checked><span class="muted">跟随</span></label>
+    <select id="selPoll" title="轮询间隔" style="width:82px">
+      <option value="250">250 ms</option>
+      <option value="500" selected>500 ms</option>
+      <option value="1000">1 s</option>
+      <option value="2000">2 s</option>
+      <option value="5000">5 s</option>
+    </select>
+    <div class="grow"></div>
+    <input type="text" id="qSearch" placeholder="搜索 pc / addr / 任意字段…" style="width:210px" title="全局过滤，支持 pc=1e88、addr=00000ede00、iid=05 或纯文本">
+    <button class="btn" id="bSide" title="侧栏">◧</button>
+    <button class="btn" id="bDetail" title="详情面板">◨</button>
+    <button class="btn" id="bSchema" title="字段语义配置">⚙</button>
+    <button class="btn" id="bAbout" title="关于 / 更新日志">ⓘ</button>
+    <button class="btn" id="bHelp" title="帮助">?</button>
+  </div>
+
+  <!-- ======================= FOLLOW BANNER ======================= -->
+  <div id="followBanner" class="follow-banner" role="status">
+    <span class="ic">📡</span>
+    <div class="ftxt"><b id="followTitle">实时跟进</b><span id="followTxt"></span></div>
+    <div class="fbtns">
+      <button class="btn sm" id="bFollowCheck" title="立即重新选择文件以检查新增数据">⟳ 立即检查</button>
+      <button class="btn sm" id="bFollowPause" title="暂停 / 继续 跟随">⏸ 暂停跟随</button>
+      <button class="btn sm" id="bFollowStop" title="停止跟随">✕ 停止</button>
+    </div>
+  </div>
+
+  <!-- ======================= MIDDLE ======================= -->
+  <div id="mid">
+
+    <!-- ---------- sidebar ---------- -->
+    <div id="side">
+      <div class="grp" id="gSrc"><h4><span class="cv">▼</span>数据源<span class="cnt" id="srcCnt"></span></h4>
+        <div class="bd">
+          <div class="stat"><span class="muted">文件</span><b id="sFile" class="dim">—</b></div>
+          <div class="stat"><span class="muted">模式</span><b id="sMode" class="dim">—</b></div>
+          <div class="stat"><span class="muted">已读</span><b id="sBytes">0 B</b></div>
+          <div class="stat"><span class="muted">事件数</span><b id="sEvents">0</b></div>
+          <div class="stat"><span class="muted">时间跨度</span><b id="sSpan">—</b></div>
+          <div class="stat"><span class="muted">周期</span><b id="sPeriod">—</b></div>
+          <div class="row" style="margin-top:9px">
+            <span>时间单位</span>
+            <select id="selUnit" style="flex:1">
+              <option value="1">原始 tick</option>
+              <option value="fs">fs</option><option value="ps" selected>ps</option>
+              <option value="ns">ns</option><option value="us">us</option>
+            </select>
+          </div>
+          <div class="row"><span>X 轴</span>
+            <select id="selXAxis" style="flex:1">
+              <option value="cycle" selected>周期 cycle</option>
+              <option value="time">仿真时间</option>
+            </select>
+          </div>
+          <div class="row"><span>周期长度</span><input type="number" id="inPeriod" min="1" step="1" title="一个时钟周期对应多少 tick，自动检测，可手改"></div>
+        </div>
+      </div>
+
+      <div class="grp" id="gTags"><h4><span class="cv">▼</span>事件类型 / 泳道<span class="cnt" id="tagCnt"></span></h4>
+        <div class="bd">
+          <div style="display:flex;gap:5px;margin-bottom:7px">
+            <button class="btn sm grow" id="bTagAll">全选</button>
+            <button class="btn sm grow" id="bTagNone">全不选</button>
+            <button class="btn sm grow" id="bTagInv">反选</button>
+          </div>
+          <div id="tagList"></div>
+        </div>
+      </div>
+
+      <div class="grp" id="gFilter"><h4><span class="cv">▼</span>过滤器</h4>
+        <div class="bd">
+          <div class="row"><span>PC</span><input type="text" id="fPC" placeholder="1e88,1ea8" class="mono"></div>
+          <div class="row"><span>Cacheline</span><input type="text" id="fAddr" placeholder="00000ede00" class="mono"></div>
+          <div class="row"><span>地址 ≥</span><input type="text" id="fAddrLo" placeholder="0x0" class="mono"></div>
+          <div class="row"><span>地址 &lt;</span><input type="text" id="fAddrHi" placeholder="0xffffffffff" class="mono"></div>
+          <div class="row"><span>IID</span><input type="text" id="fIID" placeholder="05" class="mono"></div>
+          <label class="ck" style="margin:9px 0 3px"><input type="checkbox" id="ckOnlySel"><span class="muted">仅显示选中 cacheline 的事件</span></label>
+          <button class="btn sm" id="bClrFilter" style="width:100%;justify-content:center;margin-top:7px">清空过滤器</button>
+          <div class="stat" style="margin-top:8px"><span class="muted">命中</span><b id="fHit">—</b></div>
+        </div>
+      </div>
+
+      <div class="grp col" id="gSel"><h4><span class="cv">▼</span>选中 Cacheline</h4>
+        <div class="bd" id="selBox"><div class="dim" style="font-size:11.5px">点击任意事件以追踪其 cacheline 的完整流水生命周期</div></div>
+      </div>
+
+      <div class="grp" id="gView"><h4><span class="cv">▼</span>视图选项</h4>
+        <div class="bd">
+          <label class="ck" style="margin:5px 0"><input type="checkbox" id="ckLinks" checked><span class="muted">绘制流水连接线</span></label>
+          <label class="ck" style="margin:5px 0"><input type="checkbox" id="ckIIDLink" checked><span class="muted">LSU 内 IID 关联线</span></label>
+          <label class="ck" style="margin:5px 0"><input type="checkbox" id="ckGrid" checked><span class="muted">时间网格</span></label>
+          <label class="ck" style="margin:5px 0"><input type="checkbox" id="ckLabels" checked><span class="muted">事件标签（PC/地址）</span></label>
+          <label class="ck" style="margin:5px 0"><input type="checkbox" id="ckDensity" checked><span class="muted">缩得过小时聚合为密度条</span></label>
+          <div class="row"><span>连线窗口</span><input type="number" id="inLinkWin" value="4000" step="500" title="同一 cacheline 两事件间隔超过该周期数则不连线"></div>
+          <div class="row"><span>事件大小</span><input type="range" id="inSize" min="2" max="9" value="4" style="flex:1"></div>
+        </div>
+      </div>
+
+      <div class="grp col" id="gPerf"><h4><span class="cv">▼</span>内存 / 性能</h4>
+        <div class="bd">
+          <div class="stat"><span class="muted">解析耗时</span><b id="pParse">—</b></div>
+          <div class="stat"><span class="muted">渲染帧</span><b id="pFrame">—</b></div>
+          <div class="stat"><span class="muted">可见事件</span><b id="pVis">—</b></div>
+          <div class="row"><span>保留上限</span>
+            <select id="selCap" style="flex:1">
+              <option value="0" selected>不限</option>
+              <option value="500000">50 万条</option>
+              <option value="2000000">200 万条</option>
+              <option value="5000000">500 万条</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- main ---------- -->
+    <div id="main">
+      <div id="tabs">
+        <div class="tab on" data-pane="pipe">🔗 流水线</div>
+        <div class="tab" data-pane="addr">📈 地址-时间</div>
+        <div class="tab" data-pane="txn">🧾 事务生命周期</div>
+        <div class="tab" data-pane="tbl">📋 事件表</div>
+        <div class="tab" data-pane="an">📊 分析</div>
+      </div>
+
+      <div id="panes">
+        <!-- pipeline -->
+        <div class="pane on" data-pane="pipe">
+          <div class="vtool">
+            <span class="lb">缩放</span>
+            <button class="btn sm" id="bZoomOut">−</button><button class="btn sm" id="bZoomIn">+</button>
+            <button class="btn sm" id="bZoomFit">全览</button>
+            <button class="btn sm" id="bZoomLast">最新 2k cycle</button>
+            <div class="sep"></div>
+            <span class="lb" id="lbWin">—</span>
+            <div class="grow"></div>
+            <span class="lb">滚轮=缩放 · 拖拽=平移 · Shift+拖拽=框选 · 点击=选中</span>
+          </div>
+          <div id="ovwrap"><canvas id="cvOv"></canvas><canvas id="cvOvH" class="hit"></canvas></div>
+          <div class="cvwrap" id="pipeWrap"><canvas id="cvPipe"></canvas><canvas id="cvPipeH" class="hit"></canvas></div>
+        </div>
+
+        <!-- address / time -->
+        <div class="pane" data-pane="addr">
+          <div class="vtool">
+            <span class="lb">Y 轴</span>
+            <select id="selAddrMode" style="width:150px">
+              <option value="rank" selected>压缩（按地址排名）</option>
+              <option value="linear">线性地址</option>
+            </select>
+            <span class="lb">着色</span>
+            <select id="selColor" style="width:120px">
+              <option value="tag" selected>事件类型</option>
+              <option value="pc">PC</option>
+              <option value="src">需求 / 预取</option>
+            </select>
+            <div class="sep"></div>
+            <label class="ck"><input type="checkbox" id="ckPFLine" checked><span class="muted">预取→命中连线</span></label>
+            <label class="ck"><input type="checkbox" id="ckStride"><span class="muted">同 PC 步幅连线</span></label>
+            <div class="grow"></div>
+            <span class="lb">滚轮=缩放时间 · Ctrl+滚轮=缩放地址 · 拖拽=平移</span>
+          </div>
+          <div class="cvwrap" id="addrWrap"><canvas id="cvAddr"></canvas><canvas id="cvAddrH" class="hit"></canvas></div>
+        </div>
+
+        <!-- transactions -->
+        <div class="pane" data-pane="txn">
+          <div class="vtool">
+            <span class="lb">拆分间隔 &gt;</span><input type="number" id="inTxnGap" value="3000" step="500" style="width:88px" title="同一 cacheline 相邻事件间隔超过该周期数则视为新事务">
+            <span class="lb">cycle</span>
+            <div class="sep"></div>
+            <select id="selTxnFilter" style="width:170px">
+              <option value="all">全部事务</option>
+              <option value="miss">含总线访问（L2 miss）</option>
+              <option value="pf">含预取</option>
+              <option value="pfhit">预取命中（有效预取）</option>
+              <option value="pfwaste">无效预取</option>
+            </select>
+            <div class="grow"></div>
+            <span class="lb" id="txnCnt">—</span>
+            <button class="btn sm" id="bTxnCsv">导出 CSV</button>
+          </div>
+          <div class="tblwrap"><table class="gr" id="tTxn"><thead></thead><tbody></tbody></table></div>
+        </div>
+
+        <!-- event table -->
+        <div class="pane" data-pane="tbl">
+          <div class="vtool">
+            <span class="lb" id="tblCnt">—</span>
+            <div class="grow"></div>
+            <label class="ck"><input type="checkbox" id="ckTblFollow" checked><span class="muted">跟随最新</span></label>
+            <button class="btn sm" id="bTblCsv">导出 CSV</button>
+          </div>
+          <div class="tblwrap" id="tblScroll">
+            <div class="vtable" id="vtable">
+              <table class="gr" id="tEv" style="position:absolute;left:0;right:0"><thead></thead><tbody></tbody></table>
+              <div class="spacer" id="tblSpacer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- analytics -->
+        <div class="pane" data-pane="an">
+          <div class="vtool">
+            <button class="btn sm" id="bAnRefresh">↻ 重新统计</button>
+            <label class="ck"><input type="checkbox" id="ckAnAuto" checked><span class="muted">自动刷新</span></label>
+            <div class="grow"></div>
+            <span class="lb">统计范围：当前过滤后的全部事件</span>
+          </div>
+          <div class="an"><div class="angrid" id="anGrid"></div></div>
+        </div>
+      </div>
+
+      <!-- welcome -->
+      <div id="welcome">
+        <div class="wc">
+          <h1>CPU 访存 Trace <span>流水线可视化</span></h1>
+          <p>解析 <code style="font-family:var(--mono);color:var(--warn)">Time;Tag;K:V;…</code> 格式的仿真访存 trace，<br>
+             以流水泳道呈现 LSU → L2C → 预取器 → 总线 的完整数据流，并可随仿真器写入实时跟进。</p>
+          <div class="wgrid">
+            <div class="wcard" id="wLive">
+              <div class="ic">📡</div><b>打开并实时跟进</b>
+              <span>以<strong>只读</strong>方式跟进仿真器新写入的行。localhost / https 下<strong>全自动</strong>增量；直接双击打开本页面（file://）时，会<strong>每 4 秒提示你重新选择同一文件</strong>以追加新行，无需手动反复打开。</span>
+            </div>
+            <div class="wcard" id="wFile">
+              <div class="ic">📂</div><b>载入文件（离线）</b>
+              <span>拖拽文件到窗口，或点击选择。一次性解析，适合仿真结束后的复盘分析。任何环境可用。</span>
+            </div>
+            <div class="wcard" id="wDemo">
+              <div class="ic">🎲</div><b>生成示例数据</b>
+              <span>没有 trace？生成一段模拟 openC910 + 预取器行为的数据，立刻体验全部功能。</span>
+            </div>
+          </div>
+          <div class="wnote">
+            <b>要实时跟进？</b> 在 trace 所在目录执行 <code>python3 serve.py</code>，浏览器打开它给出的 <code>http://localhost:8777/</code> 地址，
+            即可使用「打开并实时跟进」或「URL」两种实时模式。全程<strong>只读</strong>，绝不写回 trace 文件。
+          </div>
+        </div>
+      </div>
+
+      <div id="drop"><div class="bx"><div class="ic">📥</div><b>松开以载入 trace 文件</b><div class="muted" style="margin-top:5px">支持 .txt / .log / .trace</div></div></div>
+    </div>
+
+    <!-- ---------- detail ---------- -->
+    <div id="detail">
+      <h3>事件详情</h3>
+      <div id="detailBody"><div class="dim" style="font-size:11.5px;line-height:1.8">在任意视图中点击一个事件<br>可查看其全部字段、译码结果，<br>以及所属 cacheline 的流水链路。</div></div>
+    </div>
+  </div>
+
+  <!-- ======================= STATUS ======================= -->
+  <div id="status">
+    <div class="it"><span class="dot" id="stDot"></span><span id="stText">就绪</span></div>
+    <div class="it" id="stEv"></div>
+    <div class="it" id="stWin"></div>
+    <div class="grow"></div>
+    <div class="it" id="stHover"></div>
+    <div class="it" id="stVer"></div>
+  </div>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<!-- ======================= MODALS ======================= -->
+<div class="modal" id="mUrl"><div class="box">
+  <div class="hd">🌐 通过 URL 实时跟进</div>
+  <div class="bdy">
+    <p class="help" style="margin-top:0">输入 trace 文件的 HTTP(S) 地址。前端使用 <code>Range</code> 请求只拉取新增字节，服务器需支持范围请求（<code>serve.py</code> 已支持）。</p>
+    <input type="text" id="inUrl" class="mono" style="width:100%" placeholder="http://localhost:8777/trace.txt">
+    <label class="ck" style="margin-top:11px"><input type="checkbox" id="ckUrlLive" checked><span class="muted">持续轮询新增内容</span></label>
+  </div>
+  <div class="ft"><button class="btn" data-close="mUrl">取消</button><button class="btn pri" id="bUrlGo">连接</button></div>
+</div></div>
+
+<div class="modal" id="mSchema"><div class="box">
+  <div class="hd">⚙ 字段语义配置 <span class="muted" style="font-weight:400;font-size:11.5px">— 定义字段进制、位域与枚举，译码结果显示在详情面板</span></div>
+  <div class="bdy">
+    <p class="help" style="margin-top:0">JSON 格式。<code>radix</code>=进制(16/10/2)，<code>bits</code>=one-hot 位名数组(索引即位号)，<code>enum</code>=值到含义的映射，<code>desc</code>=字段说明。
+       内置默认值基于本 trace 的统计推断，<strong>请按你的 RTL 实际编码修改</strong>。配置保存在浏览器本地。</p>
+    <textarea id="taSchema" spellcheck="false"></textarea>
+  </div>
+  <div class="ft">
+    <button class="btn" id="bSchemaReset">恢复默认</button><div class="grow"></div>
+    <button class="btn" data-close="mSchema">取消</button><button class="btn pri" id="bSchemaSave">保存</button>
+  </div>
+</div></div>
+
+<div class="modal" id="mHelp"><div class="box">
+  <div class="hd">? 使用说明</div>
+  <div class="bdy help" id="helpBody"></div>
+  <div class="ft"><button class="btn pri" data-close="mHelp">知道了</button></div>
+</div></div>
+
+<div class="modal" id="mAbout"><div class="box">
+  <div class="hd">ⓘ 关于 <span class="muted" style="font-weight:400;font-size:12px" id="aboutVer"></span></div>
+  <div class="bdy" id="aboutBody"></div>
+  <div class="ft"><button class="btn pri" data-close="mAbout">关闭</button></div>
+</div></div>
+
+<input type="file" id="fileInput" accept=".txt,.log,.trace,text/plain" style="display:none">
+<script>
+/* ==== 01-core.js ==== */
+/* ============================================================================
+ *  Memory Trace Pipeline Viewer — core
+ *  columnar store · incremental parser · live tail sources
+ * ==========================================================================*/
+'use strict';
+
+/* ------------------------------- helpers -------------------------------- */
+const $  = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const fmtInt = n => (n | 0).toLocaleString('en-US');
+
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(2) + ' MB';
+  return (b / 1073741824).toFixed(2) + ' GB';
+}
+function fmtNum(n, d) {
+  if (!isFinite(n)) return '—';
+  const a = Math.abs(n);
+  if (a >= 1e9) return (n / 1e9).toFixed(d ?? 2) + 'G';
+  if (a >= 1e6) return (n / 1e6).toFixed(d ?? 2) + 'M';
+  if (a >= 1e3) return (n / 1e3).toFixed(d ?? 1) + 'k';
+  return (Math.round(n * 100) / 100).toString();
+}
+/** 40-bit address -> 0x-prefixed 10 hex digits */
+function hexAddr(v) {
+  if (v == null || v < 0 || !isFinite(v)) return '—';
+  return '0x' + v.toString(16).padStart(10, '0');
+}
+function hexPC(v) {
+  if (v == null || v < 0 || !isFinite(v)) return '—';
+  return '0x' + v.toString(16).padStart(4, '0');
+}
+function gcd(a, b) { a = Math.abs(a); b = Math.abs(b); while (b) { const t = a % b; a = b; b = t; } return a; }
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+/** stable-ish colour from a string */
+function hashColor(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return `hsl(${(h >>> 0) % 360},68%,62%)`;
+}
+
+/* --------------------------- version & changelog --------------------------- */
+const APP_VERSION = '1.1.2';
+const APP_CHANGELOG = [
+  {
+    v: '1.1.2', date: '2025-08-07',
+    items: [
+      '修复「打开并实时跟进」在 file://（双击打开本页）下仍需手动反复重开文件才能看到更新的问题：新增「半自动跟随」——首次全量载入后，每 4 秒自动重新弹出文件选择框，用户回车重选同一文件即增量追加新行（仅喂入新增字节，已处理仿真重启导致文件变短的情况）。',
+      '新增跟随横幅：实时展示 file:// 半自动 / localhost 自动两种模式，含「立即检查 / 暂停跟随 / 停止」按钮，并提示用 serve.py 获得完全免手动的实时跟进。',
+      '「载入文件」「拖拽」操作现在会主动停止正在进行的跟随会话。',
+    ],
+  },
+  {
+    v: '1.1.1', date: '2025-08-05',
+    items: [
+      '修复「打开并实时跟进」在 file:// 与不安全上下文下点击无反应的问题：FSA 被屏蔽/挂起时改为原生文件选择框载入离线快照，并提示用 serve.py 启用实时跟进（file:// 下 File 对象在文件被追加后会变不可读，故无法做真·实时，需走 HTTP Range 模式）。',
+    ],
+  },
+  {
+    v: '1.1.0', date: '2025-08-05',
+    items: [
+      '字段语义校准：确认 TYPE 为 one-hot（位 [],[1],[4],[6],[7],[11],[12]）；WRIT=1 与 TYPE 位 6/7 完全对应（已校准）；SRC=01 的 PC 恒为 0000 → 预取路径（已校准）；RESP 位域 valid/hit/done 译码获分布支持（已校准）。',
+      '新增版本号与变更记录机制：顶部徽标、状态栏、关于弹窗均展示版本与更新日志。',
+      '新增开发文档 / 使用说明文档 / 特性文档 / 变更记录文档 四份文档。',
+      '深色主题视觉重构：统一设计变量、优化间距与排版、重做按钮/卡片/模态/图表样式。',
+      '总线标签补充 ARID / AWID / UNIQ 字段语义。',
+    ],
+  },
+  {
+    v: '1.0.0', date: '2025-08-04',
+    items: [
+      '初版：列式 TypedArray 存储 + 增量解析 + 三种数据源（静态 / FileSystemAccess / HTTP Range 实时跟进）。',
+      '五个视图：流水线泳道、地址-时间散点、事务生命周期、事件表、分析。',
+      '字段语义可编辑配置（JSON，本地保存）。',
+      '留零写回的只读服务 serve.py（支持 Range / HEAD）。',
+    ],
+  },
+];
+
+/* ------------------------- growable typed array ------------------------- */
+class Col {
+  constructor(Type, cap = 4096) { this.T = Type; this.a = new Type(cap); this.n = 0; }
+  push(v) {
+    if (this.n === this.a.length) { const b = new this.T(this.a.length * 2); b.set(this.a); this.a = b; }
+    this.a[this.n++] = v;
+  }
+  get(i) { return this.a[i]; }
+  set(i, v) { this.a[i] = v; }
+  /** keep [from, n) and shift to 0 */
+  shiftFrom(from) {
+    if (from <= 0) return;
+    this.a.copyWithin(0, from, this.n);
+    this.n -= from;
+  }
+}
+
+/* --------------------------- tag presentation --------------------------- */
+/** ordering follows the physical dataflow:  core → L2 → prefetcher → bus → core writeback */
+const TAG_META = {
+  LSU_LD_PIPE3:  { g: 'CORE', l: 'LD 发起 (PIPE3)',  c: '#38bdf8', o: 10, d: 'Load 指令在 LSU 流水 PIPE3/DA 级发起访存，携带 SRC0/SRC1/OFF 地址计算源' },
+  LSU_ST_PIPE4:  { g: 'CORE', l: 'ST 发起 (PIPE4)',  c: '#fb923c', o: 20, d: 'Store 指令在 LSU 流水 PIPE4 级发起访存，携带指令编码 CODE' },
+  L2C_CMP:       { g: 'L2',   l: 'L2C CMP 流水',     c: '#a78bfa', o: 30, d: 'L2 cache 的 compare / 仲裁流水级，SID 为 SAB 表项号，RESP 为响应' },
+  L2_TriPF:      { g: 'PF',   l: 'L2 → TriPF 训练',  c: '#fbbf24', o: 40, d: 'L2 把访存事件送给 Triverse 预取器做训练 / 触发' },
+  TriPF_L2:      { g: 'PF',   l: 'TriPF → L2 预取',  c: '#f472b6', o: 50, d: 'Triverse 预取器向 L2 发出预取请求，READY=0 表示被反压' },
+  BIU_PAD_AR:    { g: 'BUS',  l: 'AXI AR (读)',      c: '#60a5fa', o: 60, d: 'BIU 向片外发出 AXI 读地址通道请求 —— L2 miss 的外部访存' },
+  BIU_PAD_AW:    { g: 'BUS',  l: 'AXI AW (写)',      c: '#f87171', o: 70, d: 'BIU 向片外发出 AXI 写地址通道请求 —— 写回 / 写直达' },
+  LSU_LD_DA_fwd: { g: 'CORE', l: 'LD 数据前递',      c: '#2dd4bf', o: 80, d: 'Load 数据在 DA 级前递给消费者' },
+  LSU_LD_WB_pg:  { g: 'CORE', l: 'LD 写回 PREG',     c: '#4ade80', o: 90, d: 'Load 数据写回物理寄存器；FROM=DA 直通 / RB 来自 Refill Buffer' },
+};
+const GROUP_ORDER = { CORE: 0, L2: 1, PF: 2, BUS: 3, OTHER: 4 };
+const AUTO_COLORS = ['#e879f9', '#22d3ee', '#a3e635', '#fdba74', '#c4b5fd', '#5eead4', '#fca5a5', '#93c5fd'];
+
+function tagMeta(name, idx) {
+  return TAG_META[name] || (TAG_META[name] = {
+    g: 'OTHER', l: name, c: AUTO_COLORS[idx % AUTO_COLORS.length], o: 1000 + idx, d: '自动识别的事件类型',
+  });
+}
+
+/* -------- events that represent a *demand* (core-initiated) access ------- */
+const DEMAND_TAGS = new Set(['LSU_LD_PIPE3', 'LSU_ST_PIPE4']);
+const PF_REQ_TAG = 'TriPF_L2';
+const PF_TRAIN_TAG = 'L2_TriPF';
+const BUS_TAGS = new Set(['BIU_PAD_AR', 'BIU_PAD_AW']);
+
+/* flag bits */
+const F_DEMAND = 1, F_PFREQ = 2, F_BUS = 4, F_PFTRAIN = 8, F_L2 = 16;
+
+/* ============================================================================
+ *  STORE
+ * ==========================================================================*/
+const S = {
+  n: 0,
+  time: new Col(Float64Array),
+  tag: new Col(Uint8Array),
+  addl: new Col(Float64Array),
+  pc: new Col(Int32Array),
+  iid: new Col(Int16Array),
+  row: new Col(Int32Array),
+  flag: new Col(Uint8Array),
+  nextLine: new Col(Int32Array),   // next event with same cacheline
+  prevLine: new Col(Int32Array),
+  nextIID: new Col(Int32Array),    // next LSU event with same IID (short window)
+
+  tags: [],                        // [{name, meta, fields:[], cols:[Col], n, count}]
+  tagIdx: new Map(),
+  strs: [''], strMap: new Map([['', 0]]),
+
+  lastByLine: new Map(),           // addl -> last event index
+  lastByIID: new Map(),            // iid  -> last event index
+  base: 0,                         // number of events dropped from the head (index offset)
+
+  t0: Infinity, t1: -Infinity,
+  periodAuto: 0, deltaHist: new Map(), lastT: -1,
+  addrMin: Infinity, addrMax: -Infinity,
+  parseMs: 0, bytes: 0, badLines: 0,
+  dirty: 0,                        // bumped on every append
+
+  intern(s) {
+    let id = this.strMap.get(s);
+    if (id === undefined) { id = this.strs.length; this.strs.push(s); this.strMap.set(s, id); }
+    return id;
+  },
+  tagOf(name) {
+    let t = this.tagIdx.get(name);
+    if (t === undefined) {
+      t = this.tags.length;
+      this.tags.push({ name, meta: tagMeta(name, t), fields: [], fidx: new Map(), cols: [], count: 0, on: true });
+      this.tagIdx.set(name, t);
+    }
+    return t;
+  },
+  reset() {
+    const keep = ['tags', 'tagIdx', 'strs', 'strMap'];
+    this.n = 0;
+    for (const k of ['time', 'tag', 'addl', 'pc', 'iid', 'row', 'flag', 'nextLine', 'prevLine', 'nextIID']) this[k].n = 0;
+    this.tags = []; this.tagIdx = new Map();
+    this.strs = ['']; this.strMap = new Map([['', 0]]);
+    this.lastByLine.clear(); this.lastByIID.clear();
+    this.base = 0;
+    this.t0 = Infinity; this.t1 = -Infinity;
+    this.periodAuto = 0; this.deltaHist = new Map(); this.lastT = -1;
+    this.addrMin = Infinity; this.addrMax = -Infinity;
+    this.parseMs = 0; this.bytes = 0; this.badLines = 0;
+    this.dirty++;
+    void keep;
+  },
+  /** field value (string) of event i for field name f, or null */
+  field(i, f) {
+    const T = this.tags[this.tag.a[i]];
+    const fi = T.fidx.get(f);
+    if (fi === undefined) return null;
+    const id = T.cols[fi].a[this.row.a[i]];
+    return id ? this.strs[id] : null;
+  },
+  /** all fields of event i as [name, value] pairs */
+  fieldsOf(i) {
+    const T = this.tags[this.tag.a[i]], r = this.row.a[i], out = [];
+    for (let k = 0; k < T.fields.length; k++) {
+      const id = T.cols[k].a[r];
+      if (id) out.push([T.fields[k], this.strs[id]]);
+    }
+    return out;
+  },
+  tagName(i) { return this.tags[this.tag.a[i]].name; },
+  /** first event index with time >= t (binary search; trace is time-ordered) */
+  lowerBound(t) {
+    let lo = 0, hi = this.n;
+    const a = this.time.a;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < t) lo = m + 1; else hi = m; }
+    return lo;
+  },
+  upperBound(t) {
+    let lo = 0, hi = this.n;
+    const a = this.time.a;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] <= t) lo = m + 1; else hi = m; }
+    return lo;
+  },
+  get period() {
+    const ov = +($('#inPeriod')?.value || 0);
+    return ov > 0 ? ov : (this.periodAuto || 1);
+  },
+  cyc(t) { return t / this.period; },
+};
+
+/* ============================================================================
+ *  PARSER  —  "  <time>;<TAG>;K:V;K:V;…"
+ * ==========================================================================*/
+function parseChunk(text) {
+  const t0 = performance.now();
+  let p = 0;
+  const L = text.length;
+  const S_ = S;
+
+  while (p < L) {
+    let nl = text.indexOf('\n', p);
+    if (nl < 0) nl = L;
+    let e = nl;
+    if (e > p && text.charCodeAt(e - 1) === 13) e--;      // \r
+    if (e > p) parseLine(text, p, e);
+    p = nl + 1;
+  }
+  S_.parseMs += performance.now() - t0;
+  S_.dirty++;
+}
+
+function parseLine(s, a, b) {
+  // skip leading spaces
+  while (a < b && s.charCodeAt(a) === 32) a++;
+  if (a >= b) return;
+  const c0 = s.charCodeAt(a);
+  if (c0 === 35 || c0 === 47) return;                      // '#' or '//' comment
+
+  let i = s.indexOf(';', a);
+  if (i < 0 || i > b) { S.badLines++; return; }
+  const time = +s.slice(a, i);
+  if (!isFinite(time)) { S.badLines++; return; }
+
+  let j = s.indexOf(';', i + 1);
+  if (j < 0 || j > b) j = b;
+  const tagName = s.slice(i + 1, j).trim();
+  if (!tagName) { S.badLines++; return; }
+
+  const t = S.tagOf(tagName);
+  const T = S.tags[t];
+  const idx = S.n;
+  const r = T.count;
+
+  // ---- key:value pairs -------------------------------------------------
+  let addl = -1, pc = -1, iid = -1;
+  let k = j + 1;
+  while (k < b) {
+    let sc = s.indexOf(';', k);
+    if (sc < 0 || sc > b) sc = b;
+    if (sc > k) {
+      const cl = s.indexOf(':', k);
+      if (cl > 0 && cl < sc) {
+        const key = s.slice(k, cl).trim();
+        const val = s.slice(cl + 1, sc).trim();
+        if (key) {
+          let fi = T.fidx.get(key);
+          if (fi === undefined) {
+            fi = T.fields.length;
+            T.fields.push(key); T.fidx.set(key, fi);
+            const col = new Col(Int32Array, Math.max(4096, T.count + 1));
+            col.n = T.count;                                // back-fill previous rows with 0
+            T.cols.push(col);
+          }
+          const col = T.cols[fi];
+          while (col.n < r) col.push(0);
+          col.push(S.intern(val));
+          if (key === 'ADDL') addl = parseInt(val, 16);
+          else if (key === 'PC') pc = parseInt(val, 16);
+          else if (key === 'IID') iid = parseInt(val, 16);
+        }
+      }
+    }
+    k = sc + 1;
+  }
+  for (const col of T.cols) while (col.n <= r) col.push(0);  // pad missing fields
+  T.count++;
+
+  if (!isFinite(addl)) addl = -1;
+  if (!isFinite(pc)) pc = -1;
+  if (!isFinite(iid)) iid = -1;
+
+  // ---- flags ------------------------------------------------------------
+  let fl = 0;
+  if (DEMAND_TAGS.has(tagName)) fl |= F_DEMAND;
+  if (tagName === PF_REQ_TAG) fl |= F_PFREQ;
+  if (tagName === PF_TRAIN_TAG) fl |= F_PFTRAIN;
+  if (BUS_TAGS.has(tagName)) fl |= F_BUS;
+  if (tagName === 'L2C_CMP') fl |= F_L2;
+
+  // ---- columns ----------------------------------------------------------
+  S.time.push(time); S.tag.push(t); S.addl.push(addl);
+  S.pc.push(pc); S.iid.push(iid); S.row.push(r); S.flag.push(fl);
+  S.nextLine.push(-1); S.prevLine.push(-1); S.nextIID.push(-1);
+
+  // ---- cross links ------------------------------------------------------
+  if (addl >= 0) {
+    const prev = S.lastByLine.get(addl);
+    if (prev !== undefined && prev >= S.base) {
+      const pi = prev - S.base;
+      S.nextLine.a[pi] = idx; S.prevLine.a[idx] = pi;
+    }
+    S.lastByLine.set(addl, idx + S.base);
+    if (addl < S.addrMin) S.addrMin = addl;
+    if (addl > S.addrMax) S.addrMax = addl;
+  }
+  if (iid >= 0 && tagName.startsWith('LSU_')) {
+    const prev = S.lastByIID.get(iid);
+    if (prev !== undefined && prev >= S.base) {
+      const pi = prev - S.base;
+      // only chain if within a plausible in-flight window (IIDs are recycled)
+      if (time - S.time.a[pi] < (S.periodAuto || 1e5) * 400) S.nextIID.a[pi] = idx;
+    }
+    S.lastByIID.set(iid, idx + S.base);
+  }
+
+  // ---- time bookkeeping -------------------------------------------------
+  if (time < S.t0) S.t0 = time;
+  if (time > S.t1) S.t1 = time;
+  if (S.lastT >= 0) {
+    const d = time - S.lastT;
+    if (d > 0 && S.deltaHist.size < 4096) S.deltaHist.set(d, (S.deltaHist.get(d) || 0) + 1);
+  }
+  S.lastT = time;
+
+  S.n++;
+}
+
+/** auto-detect clock period = most frequent positive timestamp delta */
+function detectPeriod() {
+  let best = 0, bestC = -1;
+  for (const [d, c] of S.deltaHist) if (c > bestC || (c === bestC && d < best)) { best = d; bestC = c; }
+  if (!best) return;
+  // refine: if a smaller delta divides `best` and is reasonably frequent, prefer it
+  let g = best;
+  for (const [d, c] of S.deltaHist) if (c > bestC * 0.25) g = gcd(g, d);
+  S.periodAuto = g > 0 ? g : best;
+}
+
+/** drop oldest events to respect the retention cap, then rebuild links */
+function trimStore(cap) {
+  if (!cap || S.n <= cap) return;
+  const drop = S.n - Math.floor(cap * 0.75);
+  for (const k of ['time', 'tag', 'addl', 'pc', 'iid', 'row', 'flag', 'nextLine', 'prevLine', 'nextIID']) S[k].shiftFrom(drop);
+  S.n -= drop;
+  S.base += drop;
+  // per-tag columns: count how many rows of each tag were dropped
+  const dropped = new Int32Array(S.tags.length);
+  // rows are monotonically increasing per tag, so the first surviving row tells us
+  const firstRow = new Int32Array(S.tags.length).fill(-1);
+  for (let i = 0; i < S.n; i++) { const t = S.tag.a[i]; if (firstRow[t] < 0) firstRow[t] = S.row.a[i]; }
+  for (let t = 0; t < S.tags.length; t++) {
+    const T = S.tags[t], fr = firstRow[t] < 0 ? T.count : firstRow[t];
+    dropped[t] = fr;
+    if (fr > 0) { for (const c of T.cols) c.shiftFrom(fr); T.count -= fr; }
+  }
+  for (let i = 0; i < S.n; i++) S.row.a[i] -= dropped[S.tag.a[i]];
+  // rebuild intra-window links
+  S.nextLine.a.fill(-1, 0, S.n); S.prevLine.a.fill(-1, 0, S.n); S.nextIID.a.fill(-1, 0, S.n);
+  const lastL = new Map(), lastI = new Map();
+  for (let i = 0; i < S.n; i++) {
+    const ad = S.addl.a[i];
+    if (ad >= 0) {
+      const p = lastL.get(ad);
+      if (p !== undefined) { S.nextLine.a[p] = i; S.prevLine.a[i] = p; }
+      lastL.set(ad, i);
+    }
+    const ii = S.iid.a[i];
+    if (ii >= 0 && S.tags[S.tag.a[i]].name.startsWith('LSU_')) {
+      const p = lastI.get(ii);
+      if (p !== undefined && S.time.a[i] - S.time.a[p] < (S.periodAuto || 1e5) * 400) S.nextIID.a[p] = i;
+      lastI.set(ii, i);
+    }
+  }
+  S.lastByLine.clear(); for (const [a, i] of lastL) S.lastByLine.set(a, i + S.base);
+  S.lastByIID.clear(); for (const [a, i] of lastI) S.lastByIID.set(a, i + S.base);
+}
+
+/* ============================================================================
+ *  DATA SOURCES  —  static file / FileSystemAccess handle / HTTP range
+ * ==========================================================================*/
+const Src = {
+  kind: null, name: '', handle: null, url: '',
+  offset: 0, pending: '', size: 0,
+  timer: null, live: false, paused: false, busy: false,
+  err: null, lastGrow: 0,
+
+  stop() { if (this.timer) { clearInterval(this.timer); this.timer = null; } this.live = false; },
+
+  clear() {
+    this.stop();
+    this.kind = null; this.name = ''; this.handle = null; this.url = '';
+    this.offset = 0; this.pending = ''; this.size = 0; this.paused = false; this.err = null;
+  },
+
+  /** feed raw text; keeps a partial trailing line in `pending` */
+  feed(text) {
+    const s = this.pending + text;
+    const cut = s.lastIndexOf('\n');
+    if (cut < 0) { this.pending = s; return 0; }
+    this.pending = s.slice(cut + 1);
+    const body = s.slice(0, cut + 1);
+    const before = S.n;
+    parseChunk(body);
+    S.bytes = this.offset;
+    return S.n - before;
+  },
+
+  /* -------------------- static (one-shot) file load -------------------- */
+  async loadFile(file, onProg) {
+    this.clear();
+    S.reset();
+    this.kind = 'static'; this.name = file.name; this.size = file.size;
+    const CH = 1 << 23;                              // 8 MB slices
+    const dec = new TextDecoder('utf-8');
+    for (let o = 0; o < file.size; o += CH) {
+      const buf = await file.slice(o, Math.min(o + CH, file.size)).arrayBuffer();
+      this.offset = o + buf.byteLength;
+      this.feed(dec.decode(buf, { stream: true }));
+      if (onProg) { onProg(this.offset, file.size); await new Promise(r => setTimeout(r)); }
+    }
+    if (this.pending.trim()) { parseChunk(this.pending + '\n'); this.pending = ''; }
+    S.bytes = file.size;
+    detectPeriod();
+  },
+
+  /* incremental (file:// follow): append only the bytes written since the last load.
+   * A File obtained from <input type=file> becomes NotReadableError once the underlying
+   * file grows, so the UI must re-open the picker to obtain a FRESH File object; this
+   * method then feeds just the appended bytes (and does a full reload if the file shrank).
+   * This is the only viable "follow" path when the page runs from file://, where the
+   * FileSystemAccess API hangs and fetch() is CORS-blocked. */
+  async loadFileIncremental(file, onProg) {
+    if (file.size < this.offset) {                  // simulation restarted → full reload
+      await this.loadFile(file, onProg);
+      return;
+    }
+    this.kind = 'static'; this.name = file.name; this.size = file.size;
+    if (file.size <= this.offset) return 0;         // nothing new yet
+    const CH = 1 << 23;                             // 8 MB slices
+    const dec = new TextDecoder('utf-8');
+    let added = 0;
+    for (let o = this.offset; o < file.size; o += CH) {
+      const buf = await file.slice(o, Math.min(o + CH, file.size)).arrayBuffer();
+      this.offset = o + buf.byteLength;
+      added += this.feed(dec.decode(buf, { stream: true }));
+      if (onProg) { onProg(this.offset, file.size); await new Promise(r => setTimeout(r)); }
+    }
+    if (this.pending.trim()) { parseChunk(this.pending + '\n'); this.pending = ''; }
+    S.bytes = file.size;
+    return added;
+  },
+
+  /* ------------- live: FileSystemFileHandle (read-only) ---------------- */
+  async openHandle(handle) {
+    this.clear(); S.reset();
+    this.kind = 'fsa'; this.handle = handle; this.name = handle.name;
+    await this.pollFSA(true);
+    detectPeriod();
+    this.startTimer();
+  },
+  async pollFSA(initial) {
+    const f = await this.handle.getFile();
+    this.size = f.size;
+    if (f.size < this.offset) {                       // file truncated / simulation restarted
+      S.reset(); this.offset = 0; this.pending = '';
+      Bus.emit('reset');
+    }
+    if (f.size === this.offset) return 0;
+    const dec = new TextDecoder('utf-8');
+    let added = 0;
+    const CH = 1 << 23;
+    while (this.offset < f.size) {
+      const end = Math.min(this.offset + CH, f.size);
+      const buf = await f.slice(this.offset, end).arrayBuffer();
+      this.offset = end;
+      added += this.feed(dec.decode(buf, { stream: true }));
+      if (initial && f.size > CH) await new Promise(r => setTimeout(r));
+    }
+    return added;
+  },
+
+  /* --------------------- live: HTTP range polling ---------------------- */
+  async openUrl(url, live) {
+    this.clear(); S.reset();
+    this.kind = 'http'; this.url = url;
+    this.name = url.split('/').pop() || url;
+    await this.pollHTTP();
+    detectPeriod();
+    if (live) this.startTimer();
+  },
+  /** cheap size probe that doesn't trigger a console-error on "nothing new" */
+  async probeSize() {
+    try {
+      const r = await fetch(this.url, { method: 'HEAD', cache: 'no-store' });
+      if (!r.ok) return -1;
+      const n = +r.headers.get('Content-Length');
+      return isFinite(n) ? n : -1;
+    } catch (e) { return -1; }
+  },
+  async pollHTTP() {
+    const total = await this.probeSize();
+    if (total >= 0) {
+      if (total < this.offset) {              // file truncated / simulation restarted
+        S.reset(); this.offset = 0; this.pending = '';
+        Bus.emit('reset');
+      }
+      this.size = total;
+      if (this.offset >= total) return 0;     // caught up → issue no request at all
+    }
+    let res;
+    try {
+      res = await fetch(this.url, {
+        headers: this.offset ? { Range: `bytes=${this.offset}-` } : {},
+        cache: 'no-store',
+      });
+    } catch (e) { throw e; }
+    if (res.status === 416) return 0;                       // nothing new — quiet retry next tick
+    if (!res.ok && res.status !== 206) throw new Error(`HTTP ${res.status}`);
+    const cr = res.headers.get('Content-Range');
+    if (cr) {
+      const total2 = +cr.split('/')[1];
+      if (isFinite(total2)) {
+        if (this.size && Math.abs(total2 - this.size) > 4096) {
+          S.reset(); this.offset = 0; this.pending = '';
+          Bus.emit('reset');
+        }
+        this.size = total2;
+      }
+    }
+    const txt = await res.text();
+    if (res.status === 200 && this.offset > 0) {
+      if (txt.length <= this.offset) return 0;
+      S.reset(); this.offset = 0; this.pending = '';
+      Bus.emit('reset');
+    }
+    if (!txt) return 0;
+    this.offset += new Blob([txt]).size;
+    if (!cr) this.size = this.offset;
+    return this.feed(txt);
+  },
+
+  startTimer() {
+    this.stop();
+    this.live = true;
+    const iv = +($('#selPoll').value || 500);
+    this.timer = setInterval(() => this.tick(), iv);
+  },
+  async tick() {
+    if (this.paused || this.busy) return;
+    this.busy = true;
+    try {
+      const before = S.n;
+      const n = this.kind === 'fsa' ? await this.pollFSA(false)
+        : this.kind === 'http' ? await this.pollHTTP() : 0;
+      this.err = null;
+      if (n > 0) {
+        if (!S.periodAuto) detectPeriod();
+        this.lastGrow = Date.now();
+        trimStore(+($('#selCap').value || 0));
+        Bus.emit('append', { n, before });
+      }
+    } catch (e) {
+      this.err = e.message || String(e);
+      Bus.emit('srcerr', this.err);
+    } finally { this.busy = false; }
+  },
+};
+
+/* ------------------------------ event bus ------------------------------- */
+const Bus = {
+  m: new Map(),
+  on(k, f) { (this.m.get(k) || this.m.set(k, []).get(k)).push(f); },
+  emit(k, a) { const l = this.m.get(k); if (l) for (const f of l) { try { f(a); } catch (e) { console.error(e); } } },
+};
+
+/* ============================================================================
+ *  FIELD SEMANTICS  (user-editable; defaults inferred & CALIBRATED from trace)
+ *
+ *  校准方法：用 trace 全量统计交叉验证每一个推断（见 CHANGELOG / 开发文档）。
+ *  标记约定：
+ *    · 无标记        —— 已被统计强相关确认（如 WRIT 与 TYPE 位 6/7 完全对应）
+ *    · (已校准)      —— 由分布/相关性支持，但位名/子类仍待 RTL 最终确认
+ *    · (推测)        —— 纯推断，请按实际 RTL 修正
+ * ==========================================================================*/
+const DEFAULT_SCHEMA = {
+  "_comment": "radix: 值的进制 | bits: one-hot 位名(下标=位号) | enum: 值→含义 | desc: 说明。标 (推测) 的请按实际 RTL 修正。",
+  "*": {
+    "ADDL":  { radix: 16, desc: "cacheline 首地址 (64B 对齐)" },
+    "ADDB":  { radix: 16, desc: "访问所在 bank/块地址" },
+    "ADDR":  { radix: 16, desc: "总线请求地址 (AXI ARADDR/AWADDR)" },
+    "ABYTE": { radix: 16, desc: "字节级精确地址 (ADDL + 块内偏移)" },
+    "PC":    { radix: 16, desc: "触发该事件的指令 PC", enum: {
+      "fffe": "无 PC / L2 内部发起",
+      "7fff": "预取器内部",
+      "0000": "无 PC / 复位值 (常见于 SRC=01 的预取路径)" } },
+    "IID":   { radix: 16, desc: "指令 ID (循环复用，仅短窗口内唯一)" },
+    "PREG":  { radix: 16, desc: "目的物理寄存器号" },
+    "DATA":  { radix: 16, desc: "读回 / 写入的数据" },
+    "SIZE":  { radix: 10, enum: { "0": "1B", "1": "2B", "2": "4B", "3": "8B", "4": "16B" }, desc: "访问大小 log2(字节)" },
+    "FROM":  { radix: 16, desc: "请求来源端口编号 (L2C_CMP 中为 SAB 源端口；总线标签中为 AXI 主端口)" },
+    "LENG":  { radix: 10, desc: "AXI burst 长度 (beats-1)" },
+    "BURS":  { radix: 10, enum: { "0": "FIXED", "1": "INCR", "2": "WRAP" }, desc: "AXI burst 类型" },
+    "LOCK":  { radix: 10, enum: { "0": "普通", "1": "exclusive" } },
+    "CACH":  { radix: 16, desc: "AXI ARCACHE/AWCACHE" },
+    "PROT":  { radix: 16, desc: "AXI PROT" },
+    "DOMA":  { radix: 10, enum: { "0": "Non-shareable", "1": "Inner", "2": "Outer", "3": "System" }, desc: "ACE shareability domain" },
+    "BARR":  { radix: 10, desc: "ACE barrier 类型" },
+    "SNOP":  { radix: 16, desc: "ACE snoop 类型" },
+    "ARID":  { radix: 16, desc: "AXI 读事务 ID (仅 BIU_PAD_AR)" },
+    "AWID":  { radix: 16, desc: "AXI 写事务 ID (仅 BIU_PAD_AW)" },
+    "UNIQ":  { radix: 16, desc: "AXI 原子/唯一访问提示 (仅 BIU_PAD_AW)" },
+    "MMUr":  { radix: 10, enum: { "0": "MMU 未就绪", "1": "MMU 就绪" } }
+  },
+  "L2C_CMP": {
+    "SID":  { radix: 16, desc: "SAB (Snoop/Access Buffer) 表项号" },
+    "TYPE": { radix: 16, desc: "请求类型 one-hot（本 trace 实测恒为单 bit：[],[1],[4],[6],[7],[11],[12]）", enum: {
+      "0000": "无类型 / IFU 取指流",
+      "0002": "特殊请求 (bit1, 仅 10 次)",
+      "0010": "读请求 Read (bit4；SRC=00,WRIT=0 已校准)",
+      "0040": "写请求 Store/Write (bit6；WRIT=1 已校准)",
+      "0080": "写回 WriteBack/Evict (bit7；WRIT=1 已校准)",
+      "0800": "内部清理 / Snoop 类 (bit11, 推测)",
+      "1000": "取指 / 预取通路 (bit12, 推测)" } },
+    "SRC":  { radix: 16, desc: "请求源：00=需求/内部发起, 01=预取(本 trace 中 SRC=01 的 PC 恒为 0000，已校准)", enum: {
+      "00": "需求访存 / L2 内部发起",
+      "01": "预取 prefetch (无核心 PC)" } },
+    "RESP": { radix: 2, desc: "L2 响应位向量（本 trace 取值 00001/10001/10101，bit2=hit、bit4=done 的分布吻合，已校准）", bits: ["valid", "b1", "hit(已校准)", "b3", "done(已校准)"] },
+    "CLCP": { radix: 16, desc: "clear copy 控制" },
+    "STCP": { radix: 16, desc: "set copy 控制" },
+    "FATA": { radix: 10, enum: { "0": "正常", "1": "致命错误" }, desc: "fatal error" },
+    "WRAW": { radix: 10, enum: { "0": "—", "1": "raw 写" }, desc: "write raw" },
+    "HPCP": { radix: 10, desc: "高优先级 / copy 提示" },
+    "MID":  { radix: 16, desc: "master ID (FROM=5 常与 PC=fffe 同现，为 L2 内部发起)" },
+    "CP":   { radix: 10, desc: "copy 标志" },
+    "STAL": { radix: 10, enum: { "0": "未阻塞", "1": "流水阻塞" }, desc: "stall" },
+    "WRIT": { radix: 10, enum: { "0": "读", "1": "写" }, desc: "读写方向（已校准：WRIT=1 ⟺ TYPE∈{0040,0080}）" }
+  },
+  "TriPF_L2": {
+    "REQS": { radix: 16, desc: "预取请求数 / 请求状态" },
+    "READY": { radix: 10, enum: { "0": "被 L2 反压", "1": "被接受" }, desc: "L2 是否接受该预取请求" }
+  },
+  "L2_TriPF": { "REQS": { radix: 16, desc: "送给预取器的请求属性 / 训练类型" } },
+  "LSU_LD_PIPE3": {
+    "LCHe": { radix: 16, desc: "LSU cache way / entry one-hot" },
+    "SRC0": { radix: 16, desc: "地址计算源操作数 0 (基址)" },
+    "SRC1": { radix: 16, desc: "地址计算源操作数 1 (变址)" },
+    "OFF":  { radix: 16, desc: "立即数偏移" }
+  },
+  "LSU_ST_PIPE4": {
+    "CODE": { radix: 16, desc: "store 指令编码 (RISC-V 32bit)" },
+    "SDIQ": { radix: 16, desc: "store data issue queue 表项 one-hot" },
+    "LCHe": { radix: 16, desc: "LSU cache way / entry one-hot" },
+    "TYPE": { radix: 10, desc: "store 类型 (与 L2C_CMP.TYPE 不同域，此处为十进制 store 子类型)" },
+    "MODE": { radix: 10, desc: "特权 / 访问模式" },
+    "ATOM": { radix: 10, enum: { "0": "非原子", "1": "原子操作" } }
+  },
+  "LSU_LD_WB_pg": { "FROM": { radix: 0, enum: { "DA": "DA 级直接前递", "RB": "来自 Refill Buffer (miss 回填, 与 BIU_PAD_AR 强相关)" }, desc: "写回数据来源" } }
+};
+
+let SCHEMA = loadSchema();
+function loadSchema() {
+  try {
+    const j = localStorage.getItem('trace.schema');
+    if (j) return JSON.parse(j);
+  } catch (e) { /* ignore */ }
+  return JSON.parse(JSON.stringify(DEFAULT_SCHEMA));
+}
+function schemaFor(tag, field) {
+  const a = (SCHEMA[tag] || {})[field];
+  const b = (SCHEMA['*'] || {})[field];
+  return a || b || null;
+}
+/** human-readable decoding of one field value */
+function decodeField(tag, field, val) {
+  const sc = schemaFor(tag, field);
+  if (!sc) return '';
+  const out = [];
+  if (sc.enum && sc.enum[val] !== undefined) out.push(sc.enum[val]);
+  if (sc.bits) {
+    const radix = sc.radix || 2;
+    const v = parseInt(val, radix === 2 ? 2 : radix);
+    if (isFinite(v)) {
+      const on = [];
+      for (let i = 0; i < sc.bits.length; i++) if (v & (1 << i)) on.push(sc.bits[i]);
+      if (on.length) out.push(on.join('+'));
+    }
+  }
+  if (!out.length && sc.radix === 16 && /^[0-9a-fA-F]+$/.test(val) && val.length <= 8) {
+    const v = parseInt(val, 16);
+    if (isFinite(v) && v > 9) out.push('= ' + v);
+  }
+  return out.join(' · ');
+}
+
+/* ==== 02-views.js ==== */
+/* ============================================================================
+ *  Views — canvas renderers: overview strip · pipeline swimlanes · address/time
+ * ==========================================================================*/
+
+/* ------------------------------- viewport ------------------------------- */
+const VP = {
+  t0: 0, t1: 1,           // visible raw-time window
+  y0: 0, y1: 1,           // address-view vertical window (rank or linear units)
+  yInit: false,
+  width() { return this.t1 - this.t0; },
+  set(t0, t1) {
+    const span = Math.max(S.t1 - S.t0, 1);
+    let w = Math.max(t1 - t0, S.period * 0.5);
+    w = Math.min(w, span * 40);
+    this.t0 = t0; this.t1 = t0 + w;
+  },
+  fit() {
+    if (!S.n) return;
+    const pad = Math.max((S.t1 - S.t0) * 0.02, S.period);
+    this.set(S.t0 - pad, S.t1 + pad);
+  },
+  last(cycles) {
+    if (!S.n) return;
+    const w = cycles * S.period;
+    this.set(S.t1 - w * 0.92, S.t1 + w * 0.08);
+  },
+  zoomAt(fx, factor) {                       // fx: 0..1 anchor inside window
+    const w = this.width(), nw = clamp(w * factor, S.period * 0.5, Math.max((S.t1 - S.t0) * 40, S.period * 1e6));
+    const anchor = this.t0 + w * fx;
+    this.t0 = anchor - nw * fx; this.t1 = this.t0 + nw;
+  },
+  panBy(dt) { this.t0 += dt; this.t1 += dt; },
+  followLatest() {
+    if (!S.n) return;
+    const w = this.width();
+    this.t1 = S.t1 + w * 0.06; this.t0 = this.t1 - w;
+  },
+};
+
+/* ------------------------------- filtering ------------------------------ */
+const FILT = {
+  arr: new Int32Array(1024), n: 0,
+  builtN: 0, builtBase: -1, ver: 0,
+  pcSet: null, addrSet: null, iidSet: null, lo: -1, hi: -1, q: '', onlySel: false,
+
+  parse() {
+    const gset = (s, radix) => {
+      s = (s || '').trim(); if (!s) return null;
+      const out = new Set();
+      for (let p of s.split(/[,\s]+/)) {
+        p = p.trim().replace(/^0x/i, ''); if (!p) continue;
+        const v = parseInt(p, radix); if (isFinite(v)) out.add(v);
+      }
+      return out.size ? out : null;
+    };
+    this.pcSet = gset($('#fPC').value, 16);
+    this.addrSet = gset($('#fAddr').value, 16);
+    this.iidSet = gset($('#fIID').value, 16);
+    const pv = s => { s = (s || '').trim().replace(/^0x/i, ''); const v = parseInt(s, 16); return isFinite(v) ? v : -1; };
+    this.lo = pv($('#fAddrLo').value); this.hi = pv($('#fAddrHi').value);
+    this.q = ($('#qSearch').value || '').trim().toLowerCase();
+    this.onlySel = $('#ckOnlySel').checked;
+    this.invalidate();
+  },
+  invalidate() { this.ver++; this.builtN = 0; this.n = 0; this.builtBase = S.base; },
+
+  pass(i) {
+    if (!S.tags[S.tag.a[i]].on) return false;
+    const ad = S.addl.a[i];
+    if (this.addrSet && !this.addrSet.has(ad)) return false;
+    if (this.pcSet && !this.pcSet.has(S.pc.a[i])) return false;
+    if (this.iidSet && !this.iidSet.has(S.iid.a[i])) return false;
+    if (this.lo >= 0 && !(ad >= this.lo)) return false;
+    if (this.hi >= 0 && !(ad < this.hi)) return false;
+    if (this.onlySel && SEL.line >= 0 && ad !== SEL.line) return false;
+    if (this.q) {
+      const q = this.q;
+      // structured shortcuts:  pc=1e88 / addr=xxx / iid=05 / tag=L2C
+      let ok = false;
+      const m = /^(pc|addr|addl|iid|tag)\s*[=:]\s*(.+)$/.exec(q);
+      if (m) {
+        const v = m[2].replace(/^0x/i, '');
+        if (m[1] === 'pc') ok = S.pc.a[i] === parseInt(v, 16);
+        else if (m[1] === 'iid') ok = S.iid.a[i] === parseInt(v, 16);
+        else if (m[1] === 'tag') ok = S.tags[S.tag.a[i]].name.toLowerCase().includes(v);
+        else ok = ad === parseInt(v, 16);
+      } else {
+        if (S.tags[S.tag.a[i]].name.toLowerCase().includes(q)) ok = true;
+        else if (ad >= 0 && ad.toString(16).padStart(10, '0').includes(q)) ok = true;
+        else if (S.pc.a[i] >= 0 && S.pc.a[i].toString(16).padStart(4, '0').includes(q)) ok = true;
+        else {
+          const T = S.tags[S.tag.a[i]], r = S.row.a[i];
+          for (let k = 0; k < T.cols.length && !ok; k++) {
+            const id = T.cols[k].a[r];
+            if (id && S.strs[id].toLowerCase().includes(q)) ok = true;
+          }
+        }
+      }
+      if (!ok) return false;
+    }
+    return true;
+  },
+
+  build() {
+    if (this.builtBase !== S.base) { this.builtN = 0; this.n = 0; this.builtBase = S.base; }
+    if (this.builtN === S.n) return;
+    if (this.arr.length < S.n) {
+      let c = Math.max(1024, this.arr.length);
+      while (c < S.n) c *= 2;
+      const b = new Int32Array(c); b.set(this.arr.subarray(0, this.n)); this.arr = b;
+    }
+    for (let i = this.builtN; i < S.n; i++) if (this.pass(i)) this.arr[this.n++] = i;
+    this.builtN = S.n;
+  },
+  /** indices of visible+filtered events in [t0,t1]; returns {a, s, e} slice of arr */
+  range(t0, t1) {
+    this.build();
+    const a = this.arr, n = this.n, T = S.time.a;
+    let lo = 0, hi = n;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (T[a[m]] < t0) lo = m + 1; else hi = m; }
+    const s = lo;
+    hi = n;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (T[a[m]] <= t1) lo = m + 1; else hi = m; }
+    return { a, s, e: lo };
+  },
+};
+
+/* ------------------------------ selection ------------------------------- */
+const SEL = { ev: -1, line: -1, hover: -1 };
+
+/* ------------------------------ canvas util ----------------------------- */
+function cvSetup(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const r = cv.parentNode.getBoundingClientRect();
+  const w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
+  if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  return { g, W: w, H: h };
+}
+function niceStep(range, target) {
+  if (!(range > 0)) return 1;
+  const raw = range / Math.max(1, target);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / mag;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * mag;
+}
+const UNIT_SCALE = { fs: 1e-15, ps: 1e-12, ns: 1e-9, us: 1e-6 };
+/** x-axis value for a raw time, according to the axis mode */
+function axVal(t) {
+  return $('#selXAxis').value === 'cycle' ? t / S.period : t;
+}
+function axLabel(t) {
+  if ($('#selXAxis').value === 'cycle') return fmtNum(t / S.period, 0);
+  const u = $('#selUnit').value;
+  if (u === '1' || !UNIT_SCALE[u]) return fmtNum(t, 0);
+  const sec = t * UNIT_SCALE[u];
+  if (sec >= 1e-3) return (sec * 1e3).toFixed(3) + ' ms';
+  if (sec >= 1e-6) return (sec * 1e6).toFixed(3) + ' us';
+  if (sec >= 1e-9) return (sec * 1e9).toFixed(3) + ' ns';
+  return (sec * 1e12).toFixed(2) + ' ps';
+}
+function axUnitName() { return $('#selXAxis').value === 'cycle' ? 'cycle' : ($('#selUnit').value === '1' ? 'tick' : $('#selUnit').value); }
+
+/* --------------------------- lane layout -------------------------------- */
+let LANES = [], LANE_OF = new Int32Array(256).fill(-1);
+function computeLanes() {
+  LANES = S.tags.map((T, i) => ({ t: i, T })).filter(x => x.T.on && x.T.count > 0);
+  LANES.sort((a, b) =>
+    (GROUP_ORDER[a.T.meta.g] ?? 9) - (GROUP_ORDER[b.T.meta.g] ?? 9) ||
+    a.T.meta.o - b.T.meta.o);
+  LANE_OF.fill(-1);
+  LANES.forEach((l, k) => { LANE_OF[l.t] = k; });
+}
+
+/* ============================================================================
+ *  OVERVIEW STRIP  (full trace density + brush)
+ * ==========================================================================*/
+const OV = { cache: null, key: '' };
+function drawOverview() {
+  const cv = $('#cvOv'), { g, W, H } = cvSetup(cv);
+  if (!S.n) return;
+  const NB = Math.max(60, Math.floor(W));
+  const key = `${S.dirty}|${NB}|${FILT.ver}|${S.t0}|${S.t1}`;
+  if (OV.key !== key) {
+    FILT.build();
+    const nl = Math.max(1, LANES.length);
+    const bins = new Float32Array(NB * nl);
+    const span = Math.max(S.t1 - S.t0, 1);
+    for (let k = 0; k < FILT.n; k++) {
+      const i = FILT.arr[k];
+      const b = Math.min(NB - 1, Math.floor((S.time.a[i] - S.t0) / span * NB));
+      const ln = LANE_OF[S.tag.a[i]];
+      if (ln >= 0) bins[b * nl + ln]++;
+    }
+    let mx = 1;
+    for (let b = 0; b < NB; b++) { let s = 0; for (let l = 0; l < nl; l++) s += bins[b * nl + l]; if (s > mx) mx = s; }
+    OV.cache = { bins, NB, nl, mx }; OV.key = key;
+  }
+  const { bins, NB: nb, nl, mx } = OV.cache;
+  const pad = 3, hh = H - pad * 2 - 11;
+
+  g.fillStyle = '#0a0f16'; g.fillRect(0, 0, W, H);
+  for (let b = 0; b < nb; b++) {
+    const x = b / nb * W, w = Math.max(1, W / nb + .6);
+    let y = H - pad - 11;
+    for (let l = 0; l < nl; l++) {
+      const v = bins[b * nl + l];
+      if (!v) continue;
+      const h = v / mx * hh;
+      g.fillStyle = LANES[l].T.meta.c;
+      g.globalAlpha = .82;
+      g.fillRect(x, y - h, w, h);
+      y -= h;
+    }
+  }
+  g.globalAlpha = 1;
+
+  // time axis labels
+  const span = Math.max(S.t1 - S.t0, 1);
+  g.font = '9.5px var(--mono),monospace'; g.fillStyle = '#5f7085'; g.textBaseline = 'bottom';
+  const step = niceStep(axVal(S.t0 + span) - axVal(S.t0), 9);
+  const a0 = axVal(S.t0), a1 = axVal(S.t1);
+  for (let v = Math.ceil(a0 / step) * step; v <= a1; v += step) {
+    const x = (v - a0) / (a1 - a0) * W;
+    g.fillStyle = '#1d2636'; g.fillRect(x, H - 12, 1, 5);
+    g.fillStyle = '#5f7085'; g.textAlign = 'center';
+    g.fillText(fmtNum(v, 0), clamp(x, 18, W - 18), H - 1.5);
+  }
+
+  // brush = current viewport
+  const bx0 = (axVal(VP.t0) - a0) / (a1 - a0) * W, bx1 = (axVal(VP.t1) - a0) / (a1 - a0) * W;
+  g.fillStyle = '#0d1117aa';
+  g.fillRect(0, 0, clamp(bx0, 0, W), H - 12);
+  g.fillRect(clamp(bx1, 0, W), 0, W, H - 12);
+  g.strokeStyle = '#4da3ff'; g.lineWidth = 1.5;
+  g.strokeRect(clamp(bx0, 0, W) + .5, .5, Math.max(2, clamp(bx1, 0, W) - clamp(bx0, 0, W)), H - 13);
+  g.fillStyle = '#4da3ff22'; g.fillRect(clamp(bx0, 0, W), 0, Math.max(2, clamp(bx1 - bx0, 0, W)), H - 12);
+}
+
+/* ============================================================================
+ *  PIPELINE SWIMLANES
+ * ==========================================================================*/
+const PIPE = {
+  gut: 152, ruler: 22, yoff: 0, laneH: 40,
+  hitX: new Float32Array(0), hitY: null, hitI: null, hitN: 0,
+  lastFrameMs: 0, visN: 0,
+};
+
+function drawPipe() {
+  const t0p = performance.now();
+  const cv = $('#cvPipe'), { g, W, H } = cvSetup(cv);
+  const gut = PIPE.gut, ruler = PIPE.ruler;
+  const plotW = W - gut, plotH = H - ruler;
+
+  g.fillStyle = '#0d1117'; g.fillRect(0, 0, W, H);
+  if (!S.n) { emptyMsg(g, W, H, '暂无数据 — 请载入 trace 文件'); return; }
+  computeLanes();
+  if (!LANES.length) { emptyMsg(g, W, H, '所有事件类型都被隐藏了'); return; }
+
+  const n = LANES.length;
+  const laneH = PIPE.laneH = clamp(plotH / n, 22, 78);
+  const totalH = laneH * n;
+  PIPE.yoff = clamp(PIPE.yoff, 0, Math.max(0, totalH - plotH));
+  const yoff = PIPE.yoff;
+
+  const t0 = VP.t0, t1 = VP.t1, tw = Math.max(t1 - t0, 1e-9);
+  const X = t => gut + (t - t0) / tw * plotW;
+  const laneY = k => ruler + k * laneH - yoff + laneH / 2;
+
+  /* ---- lane backgrounds & separators ---- */
+  for (let k = 0; k < n; k++) {
+    const y = ruler + k * laneH - yoff;
+    if (y > H || y + laneH < ruler) continue;
+    g.fillStyle = k & 1 ? '#0f151f' : '#0d1117';
+    g.fillRect(gut, y, plotW, laneH);
+    const prevG = k > 0 ? LANES[k - 1].T.meta.g : null;
+    if (LANES[k].T.meta.g !== prevG) {
+      g.fillStyle = '#31405a'; g.fillRect(gut, y, plotW, 1);
+    } else {
+      g.fillStyle = '#161d2b'; g.fillRect(gut, y, plotW, 1);
+    }
+    // centre guide
+    g.fillStyle = '#141c28'; g.fillRect(gut, y + laneH / 2, plotW, 1);
+  }
+
+  /* ---- time grid ---- */
+  const a0 = axVal(t0), a1 = axVal(t1);
+  const step = niceStep(a1 - a0, Math.max(4, Math.floor(plotW / 110)));
+  if ($('#ckGrid').checked) {
+    g.strokeStyle = '#1a2231'; g.lineWidth = 1; g.beginPath();
+    for (let v = Math.ceil(a0 / step) * step; v <= a1; v += step) {
+      const x = Math.round(gut + (v - a0) / (a1 - a0) * plotW) + .5;
+      g.moveTo(x, ruler); g.lineTo(x, H);
+    }
+    g.stroke();
+  }
+
+  /* ---- collect visible events ---- */
+  const { a, s, e } = FILT.range(t0, t1);
+  const cnt = e - s;
+  PIPE.visN = cnt;
+  const density = $('#ckDensity').checked && cnt > 30000;
+  const sz = +$('#inSize').value;
+
+  if (PIPE.hitX.length < cnt) {
+    PIPE.hitX = new Float32Array(cnt + 1024); PIPE.hitY = new Float32Array(cnt + 1024); PIPE.hitI = new Int32Array(cnt + 1024);
+  }
+  PIPE.hitN = 0;
+
+  /* ---- links (draw beneath the marks) ---- */
+  const selLine = SEL.line;
+  if ($('#ckLinks').checked && !density && cnt < 14000) {
+    const winCyc = +$('#inLinkWin').value || 4000;
+    const maxGap = winCyc * S.period;
+    let drawn = 0;
+    g.lineWidth = 1;
+    for (let k = s; k < e && drawn < 9000; k++) {
+      const i = a[k];
+      const j = S.nextLine.a[i];
+      if (j < 0) continue;
+      const dt = S.time.a[j] - S.time.a[i];
+      if (dt > maxGap) continue;
+      const l1 = LANE_OF[S.tag.a[i]], l2 = LANE_OF[S.tag.a[j]];
+      if (l1 < 0 || l2 < 0) continue;
+      if (!FILT.pass(j)) continue;
+      const x1 = X(S.time.a[i]), y1 = laneY(l1), x2 = X(S.time.a[j]), y2 = laneY(l2);
+      if (x2 < gut - 40 || x1 > W + 40) continue;
+      const isSel = selLine >= 0 && S.addl.a[i] === selLine;
+      if (selLine >= 0 && !isSel) { g.strokeStyle = '#222c3d'; g.globalAlpha = .5; }
+      else if (isSel) { g.strokeStyle = '#ffd479'; g.globalAlpha = 1; g.lineWidth = 1.9; }
+      else { g.strokeStyle = l2 > l1 ? '#3b5578' : '#4a3d63'; g.globalAlpha = .62; }
+      g.beginPath();
+      if (Math.abs(y2 - y1) < 1) {
+        g.moveTo(x1, y1); g.lineTo(x2, y2);
+      } else {
+        const mx = (x1 + x2) / 2;
+        g.moveTo(x1, y1); g.bezierCurveTo(mx, y1, mx, y2, x2, y2);
+      }
+      g.stroke();
+      // arrow head
+      if (Math.abs(x2 - x1) > 6 || Math.abs(y2 - y1) > 6) {
+        const ang = Math.atan2(y2 - (y1 + y2) / 2, x2 - (x1 + x2) / 2);
+        g.beginPath();
+        g.moveTo(x2, y2);
+        g.lineTo(x2 - 5 * Math.cos(ang - .5), y2 - 5 * Math.sin(ang - .5));
+        g.lineTo(x2 - 5 * Math.cos(ang + .5), y2 - 5 * Math.sin(ang + .5));
+        g.closePath(); g.fillStyle = g.strokeStyle; g.fill();
+      }
+      g.lineWidth = 1;
+      drawn++;
+    }
+    // IID chains inside the core
+    if ($('#ckIIDLink').checked) {
+      g.globalAlpha = .5; g.strokeStyle = '#2dd4bf'; g.setLineDash([3, 3]);
+      let d2 = 0;
+      for (let k = s; k < e && d2 < 4000; k++) {
+        const i = a[k], j = S.nextIID.a[i];
+        if (j < 0 || !FILT.pass(j)) continue;
+        const l1 = LANE_OF[S.tag.a[i]], l2 = LANE_OF[S.tag.a[j]];
+        if (l1 < 0 || l2 < 0) continue;
+        g.beginPath(); g.moveTo(X(S.time.a[i]), laneY(l1)); g.lineTo(X(S.time.a[j]), laneY(l2)); g.stroke();
+        d2++;
+      }
+      g.setLineDash([]);
+    }
+    g.globalAlpha = 1;
+  }
+
+  /* ---- marks ---- */
+  if (density) {
+    const NB = Math.max(1, Math.floor(plotW));
+    const acc = new Float32Array(NB * n);
+    for (let k = s; k < e; k++) {
+      const i = a[k], ln = LANE_OF[S.tag.a[i]];
+      if (ln < 0) continue;
+      const b = clamp(Math.floor((S.time.a[i] - t0) / tw * NB), 0, NB - 1);
+      acc[b * n + ln]++;
+    }
+    let mx = 1;
+    for (let v = 0; v < acc.length; v++) if (acc[v] > mx) mx = acc[v];
+    for (let ln = 0; ln < n; ln++) {
+      const yc = laneY(ln), hMax = laneH * .42;
+      g.fillStyle = LANES[ln].T.meta.c;
+      for (let b = 0; b < NB; b++) {
+        const v = acc[b * n + ln];
+        if (!v) continue;
+        const h = Math.max(1.5, Math.sqrt(v / mx) * hMax);
+        g.globalAlpha = .35 + .6 * (v / mx);
+        g.fillRect(gut + b, yc - h, 1, h * 2);
+      }
+    }
+    g.globalAlpha = 1;
+  } else {
+    const showLbl = $('#ckLabels').checked && cnt < 260;
+    g.textBaseline = 'bottom'; g.textAlign = 'center'; g.font = '9px var(--mono),monospace';
+    for (let k = s; k < e; k++) {
+      const i = a[k], ln = LANE_OF[S.tag.a[i]];
+      if (ln < 0) continue;
+      const x = X(S.time.a[i]), y = laneY(ln);
+      if (y < ruler - 8 || y > H + 8) continue;
+      const isSel = selLine >= 0 && S.addl.a[i] === selLine;
+      const dim = selLine >= 0 && !isSel;
+      const c = LANES[ln].T.meta.c;
+      const w = isSel ? sz + 2.4 : sz;
+
+      g.globalAlpha = dim ? .2 : 1;
+      if (S.flag.a[i] & F_PFREQ) {                 // prefetch request → diamond
+        g.fillStyle = c;
+        g.beginPath(); g.moveTo(x, y - w - 1); g.lineTo(x + w + 1, y); g.lineTo(x, y + w + 1); g.lineTo(x - w - 1, y);
+        g.closePath(); g.fill();
+      } else {
+        g.fillStyle = c;
+        g.fillRect(x - w / 2, y - w, Math.max(1.6, w), w * 2);
+      }
+      if (isSel) {
+        g.globalAlpha = 1; g.strokeStyle = '#ffd479'; g.lineWidth = 1.4;
+        g.strokeRect(x - w / 2 - 2.5, y - w - 2.5, Math.max(1.6, w) + 5, w * 2 + 5);
+      }
+      if (i === SEL.ev) {
+        g.globalAlpha = 1; g.strokeStyle = '#fff'; g.lineWidth = 1.6;
+        g.strokeRect(x - w / 2 - 4, y - w - 4, Math.max(1.6, w) + 8, w * 2 + 8);
+      }
+      if (showLbl && !dim) {
+        g.globalAlpha = .8; g.fillStyle = '#93a3bb';
+        const pc = S.pc.a[i];
+        g.fillText(pc >= 0 ? pc.toString(16).padStart(4, '0') : '', x, y - w - 3);
+      }
+      if (PIPE.hitN < PIPE.hitX.length) {
+        PIPE.hitX[PIPE.hitN] = x; PIPE.hitY[PIPE.hitN] = y; PIPE.hitI[PIPE.hitN] = i; PIPE.hitN++;
+      }
+    }
+    g.globalAlpha = 1;
+  }
+
+  /* ---- gutter (lane labels) ---- */
+  g.fillStyle = '#111823'; g.fillRect(0, 0, gut, H);
+  g.fillStyle = '#263043'; g.fillRect(gut - 1, 0, 1, H);
+  g.textBaseline = 'middle';
+  for (let k = 0; k < n; k++) {
+    const y = ruler + k * laneH - yoff, yc = y + laneH / 2;
+    if (y > H || y + laneH < ruler) continue;
+    const m = LANES[k].T.meta;
+    const prevG = k > 0 ? LANES[k - 1].T.meta.g : null;
+    if (m.g !== prevG) {
+      g.fillStyle = '#31405a'; g.fillRect(0, y, gut, 1);
+      g.font = '700 8.5px var(--ui),sans-serif'; g.fillStyle = '#5f7085'; g.textAlign = 'left';
+      g.fillText(m.g, 6, y + 6.5);
+    }
+    g.fillStyle = m.c; g.fillRect(4, yc - 5, 3, 10);
+    g.font = '11px var(--ui),sans-serif'; g.textAlign = 'left';
+    g.fillStyle = '#dbe4f0';
+    let lbl = m.l;
+    if (g.measureText(lbl).width > gut - 48) {
+      while (lbl.length > 4 && g.measureText(lbl + '…').width > gut - 48) lbl = lbl.slice(0, -1);
+      lbl += '…';
+    }
+    g.fillText(lbl, 12, yc - 4);
+    g.font = '9px var(--mono),monospace'; g.fillStyle = '#5f7085';
+    g.fillText(fmtInt(LANES[k].T.count), 12, yc + 7);
+  }
+
+  /* ---- ruler ---- */
+  g.fillStyle = '#111823'; g.fillRect(0, 0, W, ruler);
+  g.fillStyle = '#263043'; g.fillRect(0, ruler - 1, W, 1);
+  g.font = '10px var(--mono),monospace'; g.textBaseline = 'middle'; g.textAlign = 'center';
+  for (let v = Math.ceil(a0 / step) * step; v <= a1; v += step) {
+    const x = gut + (v - a0) / (a1 - a0) * plotW;
+    if (x < gut + 4) continue;
+    g.fillStyle = '#31405a'; g.fillRect(Math.round(x), ruler - 6, 1, 5);
+    g.fillStyle = '#93a3bb'; g.fillText(fmtNum(v, 0), x, ruler / 2 - 1);
+  }
+  g.textAlign = 'left'; g.fillStyle = '#5f7085'; g.font = '9.5px var(--ui),sans-serif';
+  g.fillText(axUnitName(), 6, ruler / 2 - 1);
+
+  /* ---- hover crosshair ---- */
+  if (MOUSE.in === 'pipe' && MOUSE.x > gut) {
+    g.strokeStyle = '#4da3ff66'; g.lineWidth = 1; g.setLineDash([2, 3]);
+    g.beginPath(); g.moveTo(MOUSE.x + .5, ruler); g.lineTo(MOUSE.x + .5, H); g.stroke();
+    g.setLineDash([]);
+    const tv = t0 + (MOUSE.x - gut) / plotW * tw;
+    const txt = axLabel(tv);
+    g.font = '10px var(--mono),monospace';
+    const w = g.measureText(txt).width + 10;
+    g.fillStyle = '#4da3ff'; g.fillRect(clamp(MOUSE.x - w / 2, gut, W - w), 1, w, ruler - 4);
+    g.fillStyle = '#04121f'; g.textAlign = 'center';
+    g.fillText(txt, clamp(MOUSE.x, gut + w / 2, W - w / 2), ruler / 2 - 1);
+  }
+
+  /* ---- box select ---- */
+  if (MOUSE.box) {
+    const x1 = Math.min(MOUSE.box.x0, MOUSE.x), x2 = Math.max(MOUSE.box.x0, MOUSE.x);
+    g.fillStyle = '#4da3ff22'; g.fillRect(x1, ruler, x2 - x1, H - ruler);
+    g.strokeStyle = '#4da3ff'; g.lineWidth = 1; g.strokeRect(x1 + .5, ruler + .5, x2 - x1, H - ruler - 1);
+  }
+
+  PIPE.lastFrameMs = performance.now() - t0p;
+}
+
+function emptyMsg(g, W, H, msg) {
+  g.fillStyle = '#5f7085'; g.font = '13px var(--ui),sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(msg, W / 2, H / 2);
+}
+
+/* ============================================================================
+ *  ADDRESS / TIME  scatter
+ * ==========================================================================*/
+const ADDR = {
+  gut: 96, ruler: 22, ranks: null, rankKey: '',
+  hitX: new Float32Array(0), hitY: null, hitI: null, hitN: 0,
+};
+function buildRanks() {
+  const key = S.dirty + '|' + S.n;
+  if (ADDR.rankKey === key && ADDR.ranks) return ADDR.ranks;
+  const set = new Set();
+  for (let i = 0; i < S.n; i++) { const a = S.addl.a[i]; if (a >= 0) set.add(a); }
+  const arr = Array.from(set).sort((x, y) => x - y);
+  const m = new Map();
+  arr.forEach((v, i) => m.set(v, i));
+  ADDR.ranks = { list: arr, map: m }; ADDR.rankKey = key;
+  return ADDR.ranks;
+}
+function drawAddr() {
+  const cv = $('#cvAddr'), { g, W, H } = cvSetup(cv);
+  const gut = ADDR.gut, ruler = ADDR.ruler;
+  const plotW = W - gut, plotH = H - ruler;
+  g.fillStyle = '#0d1117'; g.fillRect(0, 0, W, H);
+  if (!S.n) { emptyMsg(g, W, H, '暂无数据'); return; }
+  computeLanes();
+
+  const mode = $('#selAddrMode').value;
+  const R = buildRanks();
+  const yMaxAll = mode === 'rank' ? Math.max(1, R.list.length - 1) : Math.max(1, S.addrMax);
+  const yMinAll = mode === 'rank' ? 0 : S.addrMin;
+  if (!VP.yInit) { VP.y0 = yMinAll; VP.y1 = yMaxAll; VP.yInit = true; }
+  VP.y0 = clamp(VP.y0, yMinAll - (yMaxAll - yMinAll), yMaxAll);
+  if (VP.y1 <= VP.y0) VP.y1 = VP.y0 + 1;
+
+  const t0 = VP.t0, t1 = VP.t1, tw = Math.max(t1 - t0, 1e-9);
+  const yw = VP.y1 - VP.y0;
+  const X = t => gut + (t - t0) / tw * plotW;
+  const yOf = ad => mode === 'rank' ? (R.map.get(ad) ?? -1) : ad;
+  const Y = v => ruler + plotH - (v - VP.y0) / yw * plotH;
+
+  /* grid */
+  const a0 = axVal(t0), a1 = axVal(t1);
+  const step = niceStep(a1 - a0, Math.max(4, Math.floor(plotW / 110)));
+  g.strokeStyle = '#1a2231'; g.lineWidth = 1; g.beginPath();
+  for (let v = Math.ceil(a0 / step) * step; v <= a1; v += step) {
+    const x = Math.round(gut + (v - a0) / (a1 - a0) * plotW) + .5;
+    g.moveTo(x, ruler); g.lineTo(x, H);
+  }
+  const ystep = niceStep(yw, Math.max(3, Math.floor(plotH / 46)));
+  for (let v = Math.ceil(VP.y0 / ystep) * ystep; v <= VP.y1; v += ystep) {
+    const y = Math.round(Y(v)) + .5;
+    g.moveTo(gut, y); g.lineTo(W, y);
+  }
+  g.stroke();
+
+  const { a, s, e } = FILT.range(t0, t1);
+  const cnt = e - s;
+  if (ADDR.hitX.length < cnt) {
+    ADDR.hitX = new Float32Array(cnt + 1024); ADDR.hitY = new Float32Array(cnt + 1024); ADDR.hitI = new Int32Array(cnt + 1024);
+  }
+  ADDR.hitN = 0;
+  const colorMode = $('#selColor').value;
+  const selLine = SEL.line;
+
+  /* prefetch → later demand-use connector */
+  if ($('#ckPFLine').checked && cnt < 40000) {
+    g.strokeStyle = '#f472b6'; g.globalAlpha = .5; g.lineWidth = 1; g.setLineDash([4, 3]);
+    let d = 0;
+    for (let k = s; k < e && d < 2500; k++) {
+      const i = a[k];
+      if (!(S.flag.a[i] & F_PFREQ)) continue;
+      let j = S.nextLine.a[i], guard = 0;
+      while (j >= 0 && guard++ < 24 && !(S.flag.a[j] & F_DEMAND)) j = S.nextLine.a[j];
+      if (j < 0) continue;
+      const yv = yOf(S.addl.a[i]); if (yv < 0) continue;
+      g.beginPath(); g.moveTo(X(S.time.a[i]), Y(yv)); g.lineTo(X(S.time.a[j]), Y(yv)); g.stroke();
+      d++;
+    }
+    g.setLineDash([]); g.globalAlpha = 1;
+  }
+
+  /* same-PC stride connectors */
+  if ($('#ckStride').checked && cnt < 26000) {
+    const byPC = new Map();
+    for (let k = s; k < e; k++) {
+      const i = a[k];
+      if (!(S.flag.a[i] & F_DEMAND)) continue;
+      const p = S.pc.a[i]; if (p < 0) continue;
+      let l = byPC.get(p); if (!l) byPC.set(p, l = []);
+      if (l.length < 4000) l.push(i);
+    }
+    g.lineWidth = 1; g.globalAlpha = .45;
+    for (const [p, l] of byPC) {
+      if (l.length < 2) continue;
+      g.strokeStyle = hashColor('pc' + p);
+      g.beginPath();
+      for (let q = 0; q < l.length; q++) {
+        const yv = yOf(S.addl.a[l[q]]); if (yv < 0) continue;
+        const x = X(S.time.a[l[q]]), y = Y(yv);
+        if (q === 0) g.moveTo(x, y); else g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+
+  /* points */
+  const ps = clamp(+$('#inSize').value * .8, 2, 7);
+  for (let k = s; k < e; k++) {
+    const i = a[k], ad = S.addl.a[i];
+    if (ad < 0) continue;
+    const yv = yOf(ad); if (yv < 0) continue;
+    const x = X(S.time.a[i]), y = Y(yv);
+    if (y < ruler - 4 || y > H + 4) continue;
+    const isSel = selLine >= 0 && ad === selLine;
+    g.globalAlpha = selLine >= 0 && !isSel ? .16 : .92;
+    let c;
+    if (colorMode === 'pc') c = S.pc.a[i] >= 0 ? hashColor('pc' + S.pc.a[i]) : '#5f7085';
+    else if (colorMode === 'src') c = (S.flag.a[i] & F_PFREQ) ? '#f472b6' : (S.flag.a[i] & F_DEMAND) ? '#38bdf8' : (S.flag.a[i] & F_BUS) ? '#f87171' : '#5f7085';
+    else c = S.tags[S.tag.a[i]].meta.c;
+    g.fillStyle = c;
+    if (S.flag.a[i] & F_PFREQ) {
+      g.beginPath(); g.moveTo(x, y - ps); g.lineTo(x + ps, y + ps * .8); g.lineTo(x - ps, y + ps * .8); g.closePath(); g.fill();
+    } else {
+      g.fillRect(x - ps / 2, y - ps / 2, ps, ps);
+    }
+    if (isSel) { g.globalAlpha = 1; g.strokeStyle = '#ffd479'; g.lineWidth = 1.3; g.strokeRect(x - ps / 2 - 2, y - ps / 2 - 2, ps + 4, ps + 4); }
+    if (i === SEL.ev) { g.globalAlpha = 1; g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.strokeRect(x - ps / 2 - 3.5, y - ps / 2 - 3.5, ps + 7, ps + 7); }
+    if (ADDR.hitN < ADDR.hitX.length) { ADDR.hitX[ADDR.hitN] = x; ADDR.hitY[ADDR.hitN] = y; ADDR.hitI[ADDR.hitN] = i; ADDR.hitN++; }
+  }
+  g.globalAlpha = 1;
+
+  /* Y axis */
+  g.fillStyle = '#111823'; g.fillRect(0, 0, gut, H);
+  g.fillStyle = '#263043'; g.fillRect(gut - 1, 0, 1, H);
+  g.font = '9.5px var(--mono),monospace'; g.textBaseline = 'middle'; g.textAlign = 'right';
+  for (let v = Math.ceil(VP.y0 / ystep) * ystep; v <= VP.y1; v += ystep) {
+    const y = Y(v);
+    if (y < ruler + 4 || y > H - 2) continue;
+    g.fillStyle = '#31405a'; g.fillRect(gut - 5, Math.round(y), 4, 1);
+    g.fillStyle = '#93a3bb';
+    let lbl;
+    if (mode === 'rank') {
+      const ad = R.list[clamp(Math.round(v), 0, R.list.length - 1)];
+      lbl = ad === undefined ? '' : ad.toString(16).padStart(10, '0').replace(/^0+(?=.{6})/, '');
+    } else lbl = Math.round(v).toString(16).padStart(10, '0').replace(/^0+(?=.{6})/, '');
+    g.fillText(lbl, gut - 8, y);
+  }
+  g.textAlign = 'left'; g.fillStyle = '#5f7085'; g.font = '9.5px var(--ui),sans-serif';
+  g.fillText(mode === 'rank' ? 'cacheline (排名)' : 'cacheline 地址', 5, ruler / 2 - 1);
+
+  /* X ruler */
+  g.fillStyle = '#111823'; g.fillRect(gut, 0, W - gut, ruler);
+  g.fillStyle = '#263043'; g.fillRect(0, ruler - 1, W, 1);
+  g.font = '10px var(--mono),monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (let v = Math.ceil(a0 / step) * step; v <= a1; v += step) {
+    const x = gut + (v - a0) / (a1 - a0) * plotW;
+    if (x < gut + 4) continue;
+    g.fillStyle = '#31405a'; g.fillRect(Math.round(x), ruler - 6, 1, 5);
+    g.fillStyle = '#93a3bb'; g.fillText(fmtNum(v, 0), x, ruler / 2 - 1);
+  }
+
+  if (MOUSE.in === 'addr' && MOUSE.x > gut) {
+    g.strokeStyle = '#4da3ff55'; g.setLineDash([2, 3]); g.lineWidth = 1;
+    g.beginPath(); g.moveTo(MOUSE.x + .5, ruler); g.lineTo(MOUSE.x + .5, H);
+    g.moveTo(gut, MOUSE.y + .5); g.lineTo(W, MOUSE.y + .5); g.stroke(); g.setLineDash([]);
+  }
+}
+
+/* ---------------------------- hit testing ------------------------------- */
+function hitTest(store, x, y, r) {
+  let best = -1, bd = r * r;
+  for (let k = 0; k < store.hitN; k++) {
+    const dx = store.hitX[k] - x, dy = store.hitY[k] - y;
+    const d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = store.hitI[k]; }
+  }
+  return best;
+}
+
+/* ---------------------------- render loop ------------------------------- */
+const MOUSE = { in: null, x: 0, y: 0, box: null };
+let rafPending = false;
+function requestDraw() {
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => { rafPending = false; drawAll(); });
+}
+function drawAll() {
+  const pane = $('.tab.on')?.dataset.pane;
+  if (pane === 'pipe') { drawPipe(); drawOverview(); }
+  else if (pane === 'addr') drawAddr();
+  updateStatus();
+}
+
+/* ==== 03-ui.js ==== */
+/* ============================================================================
+ *  UI — interactions, detail panel, tables, transactions, analytics
+ * ==========================================================================*/
+
+/* --------------------------- generic modal ------------------------------ */
+function openModal(id) { $('#' + id).classList.add('on'); }
+function closeModal(id) { $('#' + id).classList.remove('on'); }
+$$('[data-close]').forEach(b => b.onclick = () => closeModal(b.dataset.close));
+$$('.modal').forEach(m => m.addEventListener('mousedown', e => { if (e.target === m) m.classList.remove('on'); }));
+
+/* ------------------------------ sidebar --------------------------------- */
+$$('.grp>h4').forEach(h => h.onclick = () => h.parentNode.classList.toggle('col'));
+
+function renderTagList() {
+  const host = $('#tagList');
+  computeLanes();
+  const all = S.tags.map((T, i) => ({ T, i })).sort((a, b) =>
+    (GROUP_ORDER[a.T.meta.g] ?? 9) - (GROUP_ORDER[b.T.meta.g] ?? 9) || a.T.meta.o - b.T.meta.o);
+  host.innerHTML = all.map(({ T, i }) => `
+    <div class="tagrow ${T.on ? '' : 'off'}" data-t="${i}" title="${esc(T.meta.d)}">
+      <span class="sw" style="background:${T.meta.c}"></span>
+      <span class="nm">${esc(T.name)}</span>
+      <span class="n">${fmtInt(T.count)}</span>
+    </div>`).join('') || '<div class="dim" style="font-size:11.5px">尚未载入数据</div>';
+  $$('.tagrow', host).forEach(r => r.onclick = () => {
+    const T = S.tags[+r.dataset.t];
+    T.on = !T.on;
+    r.classList.toggle('off', !T.on);
+    FILT.invalidate(); OV.key = ''; requestDraw(); scheduleAnalytics();
+  });
+  $('#tagCnt').textContent = S.tags.length ? S.tags.length + ' 类' : '';
+}
+$('#bTagAll').onclick = () => { S.tags.forEach(T => T.on = true); renderTagList(); FILT.invalidate(); OV.key = ''; requestDraw(); };
+$('#bTagNone').onclick = () => { S.tags.forEach(T => T.on = false); renderTagList(); FILT.invalidate(); OV.key = ''; requestDraw(); };
+$('#bTagInv').onclick = () => { S.tags.forEach(T => T.on = !T.on); renderTagList(); FILT.invalidate(); OV.key = ''; requestDraw(); };
+
+function updateSideStats() {
+  $('#sFile').textContent = Src.name || '—';
+  $('#sFile').className = Src.name ? 'mono' : 'dim';
+  $('#sMode').textContent = { static: '离线', fsa: '实时·文件句柄', http: '实时·HTTP' }[Src.kind] || '—';
+  $('#sMode').className = Src.kind === 'static' ? '' : Src.kind ? 'mono' : 'dim';
+  $('#sBytes').textContent = fmtBytes(S.bytes) + (Src.size ? ' / ' + fmtBytes(Src.size) : '');
+  $('#sEvents').textContent = fmtInt(S.n);
+  if (S.n) {
+    $('#sSpan').textContent = fmtNum((S.t1 - S.t0) / S.period, 0) + ' cyc';
+    $('#sPeriod').textContent = fmtInt(S.period) + ' tick';
+  }
+  $('#srcCnt').textContent = S.badLines ? S.badLines + ' 行异常' : '';
+  $('#pParse').textContent = S.parseMs.toFixed(0) + ' ms';
+  if (!$('#inPeriod').value && S.periodAuto) $('#inPeriod').value = S.periodAuto;
+}
+
+/* ------------------------------- status --------------------------------- */
+function updateStatus() {
+  const d = $('#stDot'), t = $('#stText');
+  if (Src.err) { d.className = 'dot err'; t.textContent = '错误: ' + Src.err; }
+  else if (Src.live && !Src.paused) {
+    d.className = 'dot live';
+    const age = Src.lastGrow ? ((Date.now() - Src.lastGrow) / 1000).toFixed(0) + 's 前' : '等待中';
+    t.textContent = `实时跟进中 · 最近新增 ${age}`;
+  } else if (Src.live && Src.paused) { d.className = 'dot pause'; t.textContent = '已暂停'; }
+  else if (S.n) { d.className = 'dot'; t.textContent = '离线分析'; }
+  else { d.className = 'dot'; t.textContent = '就绪'; }
+
+  FILT.build();
+  $('#stEv').textContent = S.n ? `${fmtInt(FILT.n)} / ${fmtInt(S.n)} 事件` : '';
+  $('#fHit').textContent = S.n ? fmtInt(FILT.n) : '—';
+  $('#stWin').textContent = S.n ? `窗口 ${fmtNum(VP.t0 / S.period, 0)} → ${fmtNum(VP.t1 / S.period, 0)} cyc` : '';
+  $('#lbWin').textContent = S.n ? `${fmtNum((VP.t1 - VP.t0) / S.period, 0)} cycle 宽 · ${axLabel(VP.t0)} → ${axLabel(VP.t1)}` : '—';
+  $('#pFrame').textContent = PIPE.lastFrameMs.toFixed(1) + ' ms';
+  $('#pVis').textContent = fmtInt(PIPE.visN);
+  updateSideStats();
+}
+
+/* ---------------------------- tooltip ----------------------------------- */
+const TIP = $('#tip');
+function showTip(i, cx, cy) {
+  const t = S.time.a[i], tag = S.tagName(i);
+  const rows = S.fieldsOf(i).map(([k, v]) => {
+    const dec = decodeField(tag, k, v);
+    return `<tr><td class="k">${esc(k)}</td><td>${esc(v)}${dec ? ` <span style="color:#ffb454">${esc(dec)}</span>` : ''}</td></tr>`;
+  }).join('');
+  TIP.innerHTML =
+    `<div><b>${esc(tag)}</b> <span class="k">#${i + S.base}</span></div>
+     <div class="k">t=${fmtInt(t)} · cycle ${fmtNum(t / S.period, 0)}</div>
+     <table>${rows}</table>
+     <div class="k" style="margin-top:4px;border-top:1px solid #263043;padding-top:3px">点击选中 · 追踪该 cacheline</div>`;
+  TIP.style.display = 'block';
+  const r = TIP.getBoundingClientRect();
+  TIP.style.left = clamp(cx + 15, 4, innerWidth - r.width - 6) + 'px';
+  TIP.style.top = clamp(cy + 15, 4, innerHeight - r.height - 6) + 'px';
+}
+function hideTip() { TIP.style.display = 'none'; }
+
+/* --------------------------- detail panel ------------------------------- */
+function renderDetail() {
+  const host = $('#detailBody');
+  const i = SEL.ev;
+  if (i < 0 || i >= S.n) {
+    host.innerHTML = '<div class="dim" style="font-size:11.5px;line-height:1.8">在任意视图中点击一个事件<br>可查看其全部字段、译码结果，<br>以及所属 cacheline 的流水链路。</div>';
+    return;
+  }
+  const tag = S.tagName(i), meta = S.tags[S.tag.a[i]].meta, t = S.time.a[i];
+  let h = `<div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+      <span style="width:10px;height:10px;border-radius:3px;background:${meta.c}"></span>
+      <b class="mono">${esc(tag)}</b><span class="pill">${esc(meta.g)}</span></div>
+    <div class="dim" style="font-size:11px;line-height:1.65;margin-bottom:9px">${esc(meta.d)}</div>
+    <div class="dfield"><span class="k">时间</span><span class="v">${fmtInt(t)} <em>cycle ${fmtNum(t / S.period, 0)}</em></span></div>
+    <div class="dfield"><span class="k">序号</span><span class="v">#${i + S.base}</span></div>`;
+
+  h += '<div class="dsec">原始字段</div>';
+  for (const [k, v] of S.fieldsOf(i)) {
+    const dec = decodeField(tag, k, v);
+    h += `<div class="dfield"><span class="k">${esc(k)}</span><span class="v">${esc(v)}${dec ? `<em>${esc(dec)}</em>` : ''}</span></div>`;
+  }
+
+  /* cacheline lifecycle chain */
+  const line = S.addl.a[i];
+  if (line >= 0) {
+    let head = i, guard = 0;
+    const gapMax = (+$('#inTxnGap').value || 3000) * S.period;
+    while (S.prevLine.a[head] >= 0 && guard++ < 4000 &&
+      S.time.a[head] - S.time.a[S.prevLine.a[head]] <= gapMax) head = S.prevLine.a[head];
+    const chain = [];
+    let c = head; guard = 0;
+    while (c >= 0 && guard++ < 400) {
+      chain.push(c);
+      const nx = S.nextLine.a[c];
+      if (nx < 0 || S.time.a[nx] - S.time.a[c] > gapMax) break;
+      c = nx;
+    }
+    h += `<div class="dsec">Cacheline ${hexAddr(line)} 事务链路 · ${chain.length} 步</div><div class="chain">`;
+    const t0 = S.time.a[chain[0]];
+    chain.forEach((k, idx) => {
+      const m = S.tags[S.tag.a[k]].meta;
+      const dt = (S.time.a[k] - t0) / S.period;
+      h += `${idx ? '<div class="arrow">│</div>' : ''}
+        <div class="ci ${k === i ? 'cur' : ''}" data-ev="${k}">
+          <span class="sw" style="background:${m.c}"></span>
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(S.tagName(k))}</span>
+          <span class="t">+${fmtNum(dt, 0)}</span></div>`;
+    });
+    h += '</div>';
+    h += `<div style="margin-top:9px;display:flex;gap:6px">
+       <button class="btn sm grow" id="dSelLine">聚焦该 cacheline</button>
+       <button class="btn sm grow" id="dZoomTxn">缩放到事务</button></div>`;
+  }
+  host.innerHTML = h;
+  $$('.ci', host).forEach(el => el.onclick = () => selectEvent(+el.dataset.ev, true));
+  const b1 = $('#dSelLine'); if (b1) b1.onclick = () => { SEL.line = line; $('#ckOnlySel').checked = true; FILT.parse(); renderSelBox(); requestDraw(); };
+  const b2 = $('#dZoomTxn'); if (b2) b2.onclick = () => zoomToLine(line);
+}
+
+function renderSelBox() {
+  const host = $('#selBox');
+  if (SEL.line < 0) { host.innerHTML = '<div class="dim" style="font-size:11.5px">点击任意事件以追踪其 cacheline 的完整流水生命周期</div>'; return; }
+  let cnt = 0, first = -1, last = -1;
+  for (let i = 0; i < S.n; i++) if (S.addl.a[i] === SEL.line) { cnt++; if (first < 0) first = i; last = i; }
+  host.innerHTML = `
+    <div class="stat"><span class="muted">地址</span><b class="mono" style="color:#ffd479">${hexAddr(SEL.line)}</b></div>
+    <div class="stat"><span class="muted">事件数</span><b>${fmtInt(cnt)}</b></div>
+    <div class="stat"><span class="muted">首次</span><b>${first >= 0 ? fmtNum(S.time.a[first] / S.period, 0) + ' cyc' : '—'}</b></div>
+    <div class="stat"><span class="muted">末次</span><b>${last >= 0 ? fmtNum(S.time.a[last] / S.period, 0) + ' cyc' : '—'}</b></div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="btn sm grow" id="sbZoom">全览该行</button>
+      <button class="btn sm grow" id="sbClr">取消选中</button></div>`;
+  $('#sbZoom').onclick = () => { if (first >= 0) { VP.set(S.time.a[first] - S.period * 40, S.time.a[last] + S.period * 40); requestDraw(); } };
+  $('#sbClr').onclick = () => { SEL.line = -1; SEL.ev = -1; $('#ckOnlySel').checked = false; FILT.parse(); renderSelBox(); renderDetail(); requestDraw(); };
+}
+
+function selectEvent(i, keepLine) {
+  SEL.ev = i;
+  if (i >= 0 && !keepLine) SEL.line = S.addl.a[i] >= 0 ? S.addl.a[i] : -1;
+  $('#gSel').classList.remove('col');
+  renderDetail(); renderSelBox();
+  if (FILT.onlySel) FILT.parse();
+  requestDraw();
+}
+function zoomToLine(line) {
+  let f = -1, l = -1;
+  for (let i = 0; i < S.n; i++) if (S.addl.a[i] === line) { if (f < 0) f = i; l = i; }
+  if (f < 0) return;
+  const gapMax = (+$('#inTxnGap').value || 3000) * S.period;
+  let a = SEL.ev >= 0 ? SEL.ev : f, b = a, g = 0;
+  while (S.prevLine.a[a] >= 0 && g++ < 4000 && S.time.a[a] - S.time.a[S.prevLine.a[a]] <= gapMax) a = S.prevLine.a[a];
+  g = 0;
+  while (S.nextLine.a[b] >= 0 && g++ < 4000 && S.time.a[S.nextLine.a[b]] - S.time.a[b] <= gapMax) b = S.nextLine.a[b];
+  const pad = Math.max((S.time.a[b] - S.time.a[a]) * .18, S.period * 12);
+  VP.set(S.time.a[a] - pad, S.time.a[b] + pad);
+  $('#ckFollow').checked = false;
+  requestDraw();
+}
+
+/* ========================= canvas interactions =========================== */
+function bindCanvas(wrapSel, cvSel, which) {
+  const wrap = $(wrapSel), cv = $(cvSel);
+  let drag = null;
+
+  const local = e => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top, r }; };
+  const gut = () => which === 'pipe' ? PIPE.gut : ADDR.gut;
+  const store = () => which === 'pipe' ? PIPE : ADDR;
+
+  wrap.addEventListener('wheel', e => {
+    e.preventDefault();
+    const { x, y } = local(e);
+    const plotW = cv.clientWidth - gut();
+    if (which === 'addr' && (e.ctrlKey || e.metaKey)) {          // vertical zoom
+      const ruler = ADDR.ruler, plotH = cv.clientHeight - ruler;
+      const fy = 1 - clamp((y - ruler) / plotH, 0, 1);
+      const yw = VP.y1 - VP.y0, f = e.deltaY > 0 ? 1.22 : 1 / 1.22;
+      const anchor = VP.y0 + yw * fy, nw = Math.max(1, yw * f);
+      VP.y0 = anchor - nw * fy; VP.y1 = VP.y0 + nw;
+    } else if (which === 'pipe' && e.shiftKey) {                 // vertical lane scroll
+      PIPE.yoff += e.deltaY;
+    } else {
+      const fx = clamp((x - gut()) / plotW, 0, 1);
+      VP.zoomAt(fx, e.deltaY > 0 ? 1.22 : 1 / 1.22);
+      $('#ckFollow').checked = false;
+    }
+    requestDraw();
+  }, { passive: false });
+
+  wrap.addEventListener('mousedown', e => {
+    const { x, y } = local(e);
+    if (e.shiftKey && which === 'pipe') { MOUSE.box = { x0: x }; drag = { box: true }; }
+    else drag = { x, y, t0: VP.t0, t1: VP.t1, y0: VP.y0, y1: VP.y1, yoff: PIPE.yoff, moved: 0 };
+    cv.style.cursor = 'grabbing';
+  });
+
+  wrap.addEventListener('mousemove', e => {
+    const { x, y } = local(e);
+    MOUSE.in = which; MOUSE.x = x; MOUSE.y = y;
+    if (drag && drag.box) { requestDraw(); return; }
+    if (drag) {
+      drag.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
+      const plotW = cv.clientWidth - gut();
+      const dt = -(x - drag.x) / plotW * (drag.t1 - drag.t0);
+      VP.t0 = drag.t0 + dt; VP.t1 = drag.t1 + dt;
+      if (drag.moved > 3) $('#ckFollow').checked = false;
+      if (which === 'addr') {
+        const plotH = cv.clientHeight - ADDR.ruler;
+        const dy = (y - drag.y) / plotH * (drag.y1 - drag.y0);
+        VP.y0 = drag.y0 + dy; VP.y1 = drag.y1 + dy;
+      } else {
+        PIPE.yoff = drag.yoff - (y - drag.y);
+      }
+      hideTip(); requestDraw(); return;
+    }
+    const hit = hitTest(store(), x, y, 11);
+    if (hit !== SEL.hover) {
+      SEL.hover = hit;
+      if (hit >= 0) { showTip(hit, e.clientX, e.clientY); $('#stHover').textContent = `${S.tagName(hit)} @ ${hexAddr(S.addl.a[hit])}`; }
+      else { hideTip(); $('#stHover').textContent = ''; }
+    } else if (hit >= 0) showTip(hit, e.clientX, e.clientY);
+    cv.style.cursor = hit >= 0 ? 'pointer' : 'crosshair';
+    requestDraw();
+  });
+
+  const end = e => {
+    if (!drag) return;
+    const { x } = local(e);
+    if (drag.box && MOUSE.box) {
+      const x0 = Math.min(MOUSE.box.x0, x), x1 = Math.max(MOUSE.box.x0, x);
+      if (x1 - x0 > 6) {
+        const plotW = cv.clientWidth - gut(), w = VP.t1 - VP.t0;
+        const a = VP.t0 + (x0 - gut()) / plotW * w, b = VP.t0 + (x1 - gut()) / plotW * w;
+        VP.set(a, b); $('#ckFollow').checked = false;
+      }
+      MOUSE.box = null;
+    } else if (drag.moved < 4) {
+      const hit = hitTest(store(), local(e).x, local(e).y, 12);
+      if (hit >= 0) selectEvent(hit);
+      else { SEL.ev = -1; SEL.line = -1; renderDetail(); renderSelBox(); if (FILT.onlySel) FILT.parse(); }
+    }
+    drag = null; cv.style.cursor = 'crosshair'; requestDraw();
+  };
+  addEventListener('mouseup', end);
+  wrap.addEventListener('mouseleave', () => { MOUSE.in = null; hideTip(); SEL.hover = -1; $('#stHover').textContent = ''; requestDraw(); });
+  wrap.addEventListener('dblclick', () => { VP.fit(); requestDraw(); });
+}
+bindCanvas('#pipeWrap', '#cvPipe', 'pipe');
+bindCanvas('#addrWrap', '#cvAddr', 'addr');
+
+/* overview brush */
+(() => {
+  const wrap = $('#ovwrap'), cv = $('#cvOv');
+  let drag = null;
+  const posT = e => {
+    const r = cv.getBoundingClientRect();
+    const f = clamp((e.clientX - r.left) / r.width, 0, 1);
+    return S.t0 + f * Math.max(S.t1 - S.t0, 1);
+  };
+  wrap.addEventListener('mousedown', e => { drag = { t: posT(e), w: VP.width() }; $('#ckFollow').checked = false; });
+  addEventListener('mousemove', e => {
+    if (!drag) return;
+    const t = posT(e);
+    if (Math.abs(t - drag.t) > drag.w * .04) VP.set(Math.min(drag.t, t), Math.max(drag.t, t));
+    else VP.set(t - drag.w / 2, t + drag.w / 2);
+    requestDraw();
+  });
+  addEventListener('mouseup', () => { drag = null; });
+  wrap.style.cursor = 'ew-resize';
+})();
+
+/* zoom buttons */
+$('#bZoomIn').onclick = () => { VP.zoomAt(.5, 1 / 1.6); requestDraw(); };
+$('#bZoomOut').onclick = () => { VP.zoomAt(.5, 1.6); requestDraw(); };
+$('#bZoomFit').onclick = () => { VP.fit(); $('#ckFollow').checked = false; requestDraw(); };
+$('#bZoomLast').onclick = () => { VP.last(2000); requestDraw(); };
+
+/* keyboard */
+addEventListener('keydown', e => {
+  if (/input|textarea|select/i.test(e.target.tagName)) {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+  const w = VP.width();
+  switch (e.key) {
+    case '+': case '=': VP.zoomAt(.5, 1 / 1.6); break;
+    case '-': case '_': VP.zoomAt(.5, 1.6); break;
+    case 'ArrowLeft': VP.panBy(-w * (e.shiftKey ? .5 : .12)); $('#ckFollow').checked = false; break;
+    case 'ArrowRight': VP.panBy(w * (e.shiftKey ? .5 : .12)); $('#ckFollow').checked = false; break;
+    case 'ArrowUp': PIPE.yoff -= 30; break;
+    case 'ArrowDown': PIPE.yoff += 30; break;
+    case 'f': case 'F': VP.fit(); break;
+    case 'l': case 'L': VP.last(2000); break;
+    case 'Escape': SEL.ev = -1; SEL.line = -1; $('#ckOnlySel').checked = false; FILT.parse(); renderDetail(); renderSelBox(); break;
+    case '/': e.preventDefault(); $('#qSearch').focus(); break;
+    default: return;
+  }
+  e.preventDefault(); requestDraw();
+});
+
+/* ------------------------------- tabs ----------------------------------- */
+$$('.tab').forEach(t => t.onclick = () => {
+  $$('.tab').forEach(x => x.classList.remove('on'));
+  $$('.pane').forEach(x => x.classList.remove('on'));
+  t.classList.add('on');
+  $(`.pane[data-pane="${t.dataset.pane}"]`).classList.add('on');
+  if (t.dataset.pane === 'tbl') renderTable();
+  if (t.dataset.pane === 'txn') renderTxn();
+  if (t.dataset.pane === 'an') renderAnalytics();
+  requestDraw();
+});
+$('#bSide').onclick = () => $('#side').classList.toggle('hide');
+$('#bDetail').onclick = () => $('#detail').classList.toggle('hide');
+
+/* ---------------------------- filter inputs ----------------------------- */
+let filtTimer = null;
+const onFilter = () => {
+  clearTimeout(filtTimer);
+  filtTimer = setTimeout(() => { FILT.parse(); OV.key = ''; requestDraw(); refreshActivePane(); scheduleAnalytics(); }, 180);
+};
+['#fPC', '#fAddr', '#fAddrLo', '#fAddrHi', '#fIID', '#qSearch'].forEach(s => $(s).addEventListener('input', onFilter));
+$('#ckOnlySel').onchange = () => { FILT.parse(); requestDraw(); refreshActivePane(); };
+$('#bClrFilter').onclick = () => {
+  ['#fPC', '#fAddr', '#fAddrLo', '#fAddrHi', '#fIID', '#qSearch'].forEach(s => $(s).value = '');
+  $('#ckOnlySel').checked = false;
+  FILT.parse(); OV.key = ''; requestDraw(); refreshActivePane();
+};
+['#ckLinks', '#ckIIDLink', '#ckGrid', '#ckLabels', '#ckDensity', '#inLinkWin', '#inSize',
+  '#selAddrMode', '#selColor', '#ckPFLine', '#ckStride', '#selXAxis', '#selUnit', '#inPeriod']
+  .forEach(s => $(s).addEventListener('input', () => { if (s === '#selAddrMode') VP.yInit = false; OV.key = ''; requestDraw(); }));
+$('#selPoll').onchange = () => { if (Src.live) Src.startTimer(); };
+$('#selCap').onchange = () => trimStore(+$('#selCap').value || 0);
+
+function refreshActivePane() {
+  const p = $('.tab.on')?.dataset.pane;
+  if (p === 'tbl') renderTable();
+  else if (p === 'txn') renderTxn();
+  else if (p === 'an') renderAnalytics();
+}
+
+/* ============================ EVENT TABLE ================================ */
+const ROWH = 21;
+let tblCols = [];
+function tableColumns() {
+  const base = ['#', 'cycle', 'Tag', 'ADDL', 'PC', 'IID'];
+  return base.concat(['字段']);
+}
+function renderTable() {
+  FILT.build();
+  const scroll = $('#tblScroll'), vt = $('#vtable'), tb = $('#tEv').querySelector('tbody'), th = $('#tEv').querySelector('thead');
+  tblCols = tableColumns();
+  th.innerHTML = '<tr>' + tblCols.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
+  const n = FILT.n;
+  $('#tblCnt').textContent = `${fmtInt(n)} 条事件（已过滤）`;
+  vt.style.height = (n * ROWH + 30) + 'px';
+  const top = scroll.scrollTop;
+  const first = Math.max(0, Math.floor((top - 30) / ROWH) - 4);
+  const vis = Math.ceil(scroll.clientHeight / ROWH) + 10;
+  const rows = [];
+  for (let k = first; k < Math.min(n, first + vis); k++) {
+    const i = FILT.arr[k], meta = S.tags[S.tag.a[i]].meta;
+    const extra = S.fieldsOf(i).filter(([f]) => !['ADDL', 'PC', 'IID'].includes(f))
+      .map(([f, v]) => `${f}:${v}`).join(' ');
+    rows.push(`<tr data-ev="${i}" class="${i === SEL.ev ? 'sel' : ''}">
+      <td class="dim">${i + S.base}</td>
+      <td>${fmtNum(S.time.a[i] / S.period, 0)}</td>
+      <td style="color:${meta.c}">${esc(S.tagName(i))}</td>
+      <td style="color:${S.addl.a[i] === SEL.line ? '#ffd479' : ''}">${S.addl.a[i] >= 0 ? S.addl.a[i].toString(16).padStart(10, '0') : '—'}</td>
+      <td>${S.pc.a[i] >= 0 ? S.pc.a[i].toString(16).padStart(4, '0') : '—'}</td>
+      <td>${S.iid.a[i] >= 0 ? S.iid.a[i].toString(16).padStart(2, '0') : '—'}</td>
+      <td class="dim" style="max-width:900px;overflow:hidden;text-overflow:ellipsis">${esc(extra)}</td></tr>`);
+  }
+  tb.innerHTML = rows.join('');
+  $('#tEv').style.transform = `translateY(${first * ROWH}px)`;
+  $$('#tEv tbody tr').forEach(tr => tr.onclick = () => { selectEvent(+tr.dataset.ev); renderTable(); });
+}
+$('#tblScroll').addEventListener('scroll', () => {
+  if ($('.tab.on')?.dataset.pane === 'tbl') {
+    if ($('#tblScroll').scrollTop < $('#vtable').clientHeight - $('#tblScroll').clientHeight - 40) $('#ckTblFollow').checked = false;
+    renderTable();
+  }
+});
+$('#bTblCsv').onclick = () => {
+  FILT.build();
+  const N = Math.min(FILT.n, 200000);
+  const keys = new Set(['time', 'tag', 'ADDL', 'PC', 'IID']);
+  for (const T of S.tags) T.fields.forEach(f => keys.add(f));
+  const cols = Array.from(keys);
+  const out = [cols.join(',')];
+  for (let k = 0; k < N; k++) {
+    const i = FILT.arr[k];
+    const m = new Map(S.fieldsOf(i));
+    out.push(cols.map(c => c === 'time' ? S.time.a[i] : c === 'tag' ? S.tagName(i) : (m.get(c) ?? '')).join(','));
+  }
+  download(out.join('\n'), 'trace_events.csv');
+};
+function download(text, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+
+/* ========================== TRANSACTIONS ================================= */
+let TXN = { list: [], key: '', sort: 'start', desc: false };
+function buildTxns() {
+  FILT.build();
+  const gap = (+$('#inTxnGap').value || 3000) * S.period;
+  const key = `${S.dirty}|${FILT.ver}|${FILT.n}|${gap}`;
+  if (TXN.key === key) return TXN.list;
+  const open = new Map(), out = [];
+  for (let k = 0; k < FILT.n; k++) {
+    const i = FILT.arr[k], ad = S.addl.a[i];
+    if (ad < 0) continue;
+    const t = S.time.a[i], tag = S.tagName(i), fl = S.flag.a[i];
+    let x = open.get(ad);
+    if (!x || t - x.tLast > gap) {
+      if (x) out.push(x);
+      x = { ad, t0: t, tLast: t, n: 0, tags: new Set(), pcs: new Set(),
+        tDem: -1, tPF: -1, tPFacc: -1, tBusR: -1, tBusW: -1, tWB: -1, tL2: -1,
+        pfBeforeDem: false, demAfterPF: false, sids: new Set(), first: i };
+      open.set(ad, x);
+    }
+    x.n++; x.tLast = t; x.tags.add(tag);
+    if (S.pc.a[i] >= 0 && S.pc.a[i] !== 0xfffe && S.pc.a[i] !== 0x7fff && S.pc.a[i] !== 0) x.pcs.add(S.pc.a[i]);
+    if (fl & F_DEMAND) { if (x.tDem < 0) x.tDem = t; if (x.tPF >= 0) x.demAfterPF = true; }
+    if (fl & F_PFREQ) {
+      if (x.tPF < 0) x.tPF = t;
+      if (S.field(i, 'READY') === '1' && x.tPFacc < 0) x.tPFacc = t;
+      if (x.tDem < 0) x.pfBeforeDem = true;
+    }
+    if (fl & F_L2) { if (x.tL2 < 0) x.tL2 = t; const sid = S.field(i, 'SID'); if (sid) x.sids.add(sid); }
+    if (tag === 'BIU_PAD_AR' && x.tBusR < 0) x.tBusR = t;
+    if (tag === 'BIU_PAD_AW' && x.tBusW < 0) x.tBusW = t;
+    if (tag === 'LSU_LD_WB_pg') x.tWB = t;
+  }
+  for (const x of open.values()) out.push(x);
+  out.sort((a, b) => a.t0 - b.t0);
+  TXN.list = out; TXN.key = key;
+  return out;
+}
+function txnClass(x) {
+  const hasPF = x.tPF >= 0, hasBus = x.tBusR >= 0 || x.tBusW >= 0;
+  if (hasPF && x.demAfterPF) return 'pfhit';
+  if (hasPF && !x.demAfterPF) return 'pfwaste';
+  if (hasBus) return 'miss';
+  return 'other';
+}
+const TXN_COLS = [
+  { k: 'start', t: '起始 cyc', f: x => fmtNum(x.t0 / S.period, 0), v: x => x.t0 },
+  { k: 'dur', t: '时长 cyc', f: x => fmtNum((x.tLast - x.t0) / S.period, 0), v: x => x.tLast - x.t0 },
+  { k: 'ad', t: 'Cacheline', f: x => x.ad.toString(16).padStart(10, '0'), v: x => x.ad },
+  { k: 'n', t: '事件', f: x => x.n, v: x => x.n },
+  { k: 'cls', t: '类别', f: x => ({ pfhit: '<span style="color:#33d17a">预取命中</span>', pfwaste: '<span style="color:#ffb454">预取未用</span>', miss: '<span style="color:#60a5fa">总线访问</span>', other: '<span class="dim">—</span>' })[txnClass(x)], v: x => txnClass(x) },
+  { k: 'pcs', t: 'PC', f: x => Array.from(x.pcs).slice(0, 3).map(p => p.toString(16).padStart(4, '0')).join(' ') || '—', v: x => x.pcs.size },
+  { k: 'pflead', t: '预取提前量', f: x => x.tPF >= 0 && x.tDem > x.tPF ? fmtNum((x.tDem - x.tPF) / S.period, 0) : '—', v: x => x.tPF >= 0 && x.tDem > x.tPF ? (x.tDem - x.tPF) / S.period : -1 },
+  { k: 'd2b', t: '发起→总线', f: x => x.tDem >= 0 && x.tBusR >= 0 ? fmtNum((x.tBusR - x.tDem) / S.period, 0) : '—', v: x => x.tDem >= 0 && x.tBusR >= 0 ? (x.tBusR - x.tDem) / S.period : -1 },
+  { k: 'b2w', t: '总线→写回', f: x => x.tBusR >= 0 && x.tWB > x.tBusR ? fmtNum((x.tWB - x.tBusR) / S.period, 0) : '—', v: x => x.tBusR >= 0 && x.tWB > x.tBusR ? (x.tWB - x.tBusR) / S.period : -1 },
+  { k: 'sid', t: 'SAB SID', f: x => Array.from(x.sids).slice(0, 3).join(',') || '—', v: x => x.sids.size },
+  { k: 'tags', t: '经过阶段', f: x => Array.from(x.tags).map(t => `<span class="pill" style="border-color:${S.tags[S.tagIdx.get(t)].meta.c}55;color:${S.tags[S.tagIdx.get(t)].meta.c}">${esc(t)}</span>`).join(' '), v: x => x.tags.size },
+];
+function renderTxn() {
+  let list = buildTxns();
+  const f = $('#selTxnFilter').value;
+  if (f !== 'all') list = list.filter(x => {
+    const c = txnClass(x);
+    if (f === 'miss') return x.tBusR >= 0 || x.tBusW >= 0;
+    if (f === 'pf') return x.tPF >= 0;
+    return c === f;
+  });
+  const col = TXN_COLS.find(c => c.k === TXN.sort) || TXN_COLS[0];
+  list = list.slice().sort((a, b) => {
+    const va = col.v(a), vb = col.v(b);
+    const r = va < vb ? -1 : va > vb ? 1 : 0;
+    return TXN.desc ? -r : r;
+  });
+  $('#txnCnt').textContent = `${fmtInt(list.length)} 个事务`;
+  const th = $('#tTxn thead'), tb = $('#tTxn tbody');
+  th.innerHTML = '<tr>' + TXN_COLS.map(c =>
+    `<th data-k="${c.k}">${esc(c.t)}${TXN.sort === c.k ? `<span class="ar">${TXN.desc ? '▼' : '▲'}</span>` : ''}</th>`).join('') + '</tr>';
+  const N = Math.min(list.length, 3000);
+  const rows = [];
+  for (let i = 0; i < N; i++) {
+    const x = list[i];
+    rows.push(`<tr data-ad="${x.ad}" data-ev="${x.first}" class="${x.ad === SEL.line ? 'sel' : ''}">` +
+      TXN_COLS.map(c => `<td>${c.f(x)}</td>`).join('') + '</tr>');
+  }
+  tb.innerHTML = rows.join('') || '<tr><td colspan="11" class="empty">无匹配事务</td></tr>';
+  if (list.length > N) tb.innerHTML += `<tr><td colspan="11" class="empty">仅显示前 ${fmtInt(N)} 行，请用过滤器缩小范围</td></tr>`;
+  $$('#tTxn thead th').forEach(h => h.onclick = () => {
+    if (TXN.sort === h.dataset.k) TXN.desc = !TXN.desc; else { TXN.sort = h.dataset.k; TXN.desc = true; }
+    renderTxn();
+  });
+  $$('#tTxn tbody tr[data-ad]').forEach(tr => tr.onclick = () => {
+    SEL.line = +tr.dataset.ad; selectEvent(+tr.dataset.ev, true); zoomToLine(SEL.line);
+    $$('.tab').forEach(x => x.classList.remove('on'));
+    $$('.pane').forEach(x => x.classList.remove('on'));
+    $('.tab[data-pane=pipe]').classList.add('on'); $('.pane[data-pane=pipe]').classList.add('on');
+    requestDraw();
+  });
+}
+$('#inTxnGap').addEventListener('input', () => { TXN.key = ''; renderTxn(); });
+$('#selTxnFilter').onchange = renderTxn;
+$('#bTxnCsv').onclick = () => {
+  const list = buildTxns();
+  const hdr = ['start_cycle', 'dur_cycle', 'cacheline', 'events', 'class', 'pcs', 'pf_lead_cycle', 'demand_to_bus', 'bus_to_wb', 'sids', 'stages'];
+  const out = [hdr.join(',')];
+  for (const x of list) out.push([
+    (x.t0 / S.period).toFixed(0), ((x.tLast - x.t0) / S.period).toFixed(0),
+    '0x' + x.ad.toString(16), x.n, txnClass(x),
+    '"' + Array.from(x.pcs).map(p => p.toString(16)).join(' ') + '"',
+    x.tPF >= 0 && x.tDem > x.tPF ? ((x.tDem - x.tPF) / S.period).toFixed(0) : '',
+    x.tDem >= 0 && x.tBusR >= 0 ? ((x.tBusR - x.tDem) / S.period).toFixed(0) : '',
+    x.tBusR >= 0 && x.tWB > x.tBusR ? ((x.tWB - x.tBusR) / S.period).toFixed(0) : '',
+    '"' + Array.from(x.sids).join(' ') + '"',
+    '"' + Array.from(x.tags).join(' ') + '"'].join(','));
+  download(out.join('\n'), 'trace_transactions.csv');
+};
+
+/* ============================= ANALYTICS ================================= */
+let anTimer = null;
+function scheduleAnalytics() {
+  if (!$('#ckAnAuto').checked) return;
+  if ($('.tab.on')?.dataset.pane !== 'an') return;
+  clearTimeout(anTimer); anTimer = setTimeout(renderAnalytics, 300);
+}
+function hbars(items, total, colorFn) {
+  if (!items.length) return '<div class="empty">无数据</div>';
+  const mx = Math.max(...items.map(x => x[1])) || 1;
+  return items.map(([k, v]) => `
+    <div class="hbar"><div class="lbl" title="${esc(k)}">${esc(k)}</div>
+      <div class="tr"><i style="width:${(v / mx * 100).toFixed(1)}%;background:${colorFn ? colorFn(k) : 'var(--acc)'}"></i></div>
+      <div class="vv">${fmtInt(v)}${total ? ' · ' + (v / total * 100).toFixed(1) + '%' : ''}</div></div>`).join('');
+}
+function sparkline(vals, color) {
+  if (!vals.length) return '';
+  const W = 300, H = 56, mx = Math.max(...vals) || 1;
+  const step = W / vals.length;
+  let d = '';
+  vals.forEach((v, i) => { d += `${i ? 'L' : 'M'}${(i * step).toFixed(1)},${(H - v / mx * (H - 6) - 2).toFixed(1)}`; });
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="1.5"/>
+    <path d="${d}L${W},${H}L0,${H}Z" fill="${color}" opacity=".13"/></svg>`;
+}
+function histCard(title, vals, unit, color) {
+  if (!vals.length) return `<div class="card"><h5>${title}</h5><div class="empty">无样本</div></div>`;
+  vals.sort((a, b) => a - b);
+  const q = p => vals[clamp(Math.floor(p * (vals.length - 1)), 0, vals.length - 1)];
+  const NB = 26, lo = q(0), hi = q(.97) || 1;
+  const bins = new Array(NB).fill(0);
+  for (const v of vals) bins[clamp(Math.floor((v - lo) / Math.max(hi - lo, 1e-9) * NB), 0, NB - 1)]++;
+  const mx = Math.max(...bins) || 1;
+  const bars = bins.map((b, i) =>
+    `<div title="${(lo + (hi - lo) * i / NB).toFixed(0)}~${(lo + (hi - lo) * (i + 1) / NB).toFixed(0)} ${unit}: ${b}" style="flex:1;height:${Math.max(1, b / mx * 62)}px;background:${color};opacity:${.35 + .6 * b / mx};border-radius:1px 1px 0 0"></div>`).join('');
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return `<div class="card"><h5>${title}<span class="hint">${fmtInt(vals.length)} 样本</span></h5>
+    <div style="display:flex;align-items:flex-end;gap:1.5px;height:64px;margin:6px 0">${bars}</div>
+    <div class="leg" style="justify-content:space-between;font-family:var(--mono)">
+      <span>min ${fmtNum(q(0), 0)}</span><span>p50 ${fmtNum(q(.5), 0)}</span>
+      <span>p90 ${fmtNum(q(.9), 0)}</span><span>max ${fmtNum(q(1), 0)}</span></div>
+    <div class="kpi" style="margin-top:6px"><span class="v" style="font-size:16px">${fmtNum(avg, 1)}</span><span class="u">${unit} 均值</span></div></div>`;
+}
+
+function renderAnalytics() {
+  const host = $('#anGrid');
+  FILT.build();
+  if (!S.n) { host.innerHTML = '<div class="empty">载入 trace 后显示统计</div>'; return; }
+  const t0 = performance.now();
+
+  /* ---- pass over filtered events ---- */
+  const tagCnt = new Map(), pcCnt = new Map(), lineCnt = new Map(), pcAddr = new Map();
+  const NB = 90, bins = new Array(NB).fill(0);
+  const span = Math.max(S.t1 - S.t0, 1);
+  let pfIssued = 0, pfAccepted = 0, pfStalled = 0, demand = 0, busR = 0, busW = 0, l2 = 0, l2stall = 0;
+  const respCnt = new Map(), typeCnt = new Map(), sidCnt = new Map();
+  for (let k = 0; k < FILT.n; k++) {
+    const i = FILT.arr[k], tag = S.tagName(i), fl = S.flag.a[i];
+    tagCnt.set(tag, (tagCnt.get(tag) || 0) + 1);
+    bins[clamp(Math.floor((S.time.a[i] - S.t0) / span * NB), 0, NB - 1)]++;
+    const ad = S.addl.a[i];
+    if (ad >= 0) lineCnt.set(ad, (lineCnt.get(ad) || 0) + 1);
+    const pc = S.pc.a[i];
+    if (fl & F_DEMAND) {
+      demand++;
+      if (pc >= 0) {
+        pcCnt.set(pc, (pcCnt.get(pc) || 0) + 1);
+        let l = pcAddr.get(pc); if (!l) pcAddr.set(pc, l = []);
+        if (l.length < 6000) l.push(ad);
+      }
+    }
+    if (fl & F_PFREQ) { pfIssued++; if (S.field(i, 'READY') === '1') pfAccepted++; else pfStalled++; }
+    if (tag === 'BIU_PAD_AR') busR++;
+    if (tag === 'BIU_PAD_AW') busW++;
+    if (fl & F_L2) {
+      l2++;
+      if (S.field(i, 'STAL') === '1') l2stall++;
+      const r = S.field(i, 'RESP'); if (r) respCnt.set(r, (respCnt.get(r) || 0) + 1);
+      const ty = S.field(i, 'TYPE'); if (ty) typeCnt.set(ty, (typeCnt.get(ty) || 0) + 1);
+      const sd = S.field(i, 'SID'); if (sd) sidCnt.set(sd, (sidCnt.get(sd) || 0) + 1);
+    }
+  }
+
+  /* ---- transaction-derived metrics ---- */
+  const txns = buildTxns();
+  let pfHit = 0, pfWaste = 0, missTx = 0, coveredMiss = 0;
+  const leadV = [], d2bV = [], b2wV = [], durV = [];
+  for (const x of txns) {
+    const c = txnClass(x);
+    if (c === 'pfhit') pfHit++; else if (c === 'pfwaste') pfWaste++;
+    if (x.tBusR >= 0 || x.tBusW >= 0) { missTx++; if (x.tPF >= 0) coveredMiss++; }
+    if (x.tPF >= 0 && x.tDem > x.tPF) leadV.push((x.tDem - x.tPF) / S.period);
+    if (x.tDem >= 0 && x.tBusR > x.tDem) d2bV.push((x.tBusR - x.tDem) / S.period);
+    if (x.tBusR >= 0 && x.tWB > x.tBusR) b2wV.push((x.tWB - x.tBusR) / S.period);
+    durV.push((x.tLast - x.t0) / S.period);
+  }
+
+  /* ---- stride analysis per PC ---- */
+  const strideRows = [];
+  for (const [pc, list] of Array.from(pcAddr).sort((a, b) => b[1].length - a[1].length).slice(0, 8)) {
+    const st = new Map();
+    for (let i = 1; i < list.length; i++) {
+      const d = list[i] - list[i - 1];
+      if (d === 0) continue;
+      st.set(d, (st.get(d) || 0) + 1);
+    }
+    const top = Array.from(st).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const tot = Array.from(st.values()).reduce((a, b) => a + b, 0) || 1;
+    strideRows.push({ pc, n: list.length, top, tot });
+  }
+
+  const cycSpan = span / S.period;
+  const cards = [];
+
+  cards.push(`<div class="card"><h5>📌 概览</h5>
+    <div class="kpi"><span class="v">${fmtInt(FILT.n)}</span><span class="u">事件</span><span class="l">共 ${fmtInt(S.n)} 条</span></div>
+    <div class="kpi"><span class="v">${fmtInt(lineCnt.size)}</span><span class="u">cacheline</span><span class="l">${fmtBytes(lineCnt.size * 64)} 足迹</span></div>
+    <div class="kpi"><span class="v">${fmtNum(cycSpan, 0)}</span><span class="u">cycle 跨度</span><span class="l">${(FILT.n / Math.max(cycSpan, 1) * 1000).toFixed(1)} 事件/千周期</span></div>
+    <div class="kpi"><span class="v">${fmtInt(txns.length)}</span><span class="u">事务</span><span class="l">平均 ${(FILT.n / Math.max(txns.length, 1)).toFixed(1)} 事件/事务</span></div>
+    <div style="margin-top:9px">${sparkline(bins, '#4da3ff')}</div>
+    <div class="dim" style="font-size:10.5px;text-align:center">事件密度随时间分布</div></div>`);
+
+  cards.push(`<div class="card"><h5>🧩 事件类型分布</h5>
+    ${hbars(Array.from(tagCnt).sort((a, b) => b[1] - a[1]), FILT.n, k => (S.tags[S.tagIdx.get(k)] || { meta: {} }).meta.c || '#4da3ff')}</div>`);
+
+  const pfTotalTx = pfHit + pfWaste;
+  cards.push(`<div class="card"><h5>🎯 预取器效果 <span class="hint">基于 ${PF_REQ_TAG} 与后续需求访存的关联</span></h5>
+    <div class="kpi"><span class="v" style="color:#f472b6">${fmtInt(pfIssued)}</span><span class="u">预取请求</span>
+      <span class="l">被接受 ${fmtInt(pfAccepted)} · 反压 ${fmtInt(pfStalled)}</span></div>
+    <div class="kpi"><span class="v" style="color:#33d17a">${pfTotalTx ? (pfHit / pfTotalTx * 100).toFixed(1) : '—'}<span class="u">%</span></span>
+      <span class="u">准确率</span><span class="l">${fmtInt(pfHit)} 有效 / ${fmtInt(pfWaste)} 未用</span></div>
+    <div class="kpi"><span class="v" style="color:#60a5fa">${missTx ? (coveredMiss / missTx * 100).toFixed(1) : '—'}<span class="u">%</span></span>
+      <span class="u">覆盖率</span><span class="l">${fmtInt(coveredMiss)} / ${fmtInt(missTx)} 总线事务</span></div>
+    <div class="kpi"><span class="v" style="color:#ffb454">${leadV.length ? fmtNum(leadV.reduce((a, b) => a + b, 0) / leadV.length, 0) : '—'}</span>
+      <span class="u">cycle 平均提前量</span><span class="l">及时性</span></div>
+    <div class="bar" style="margin-top:8px;height:8px">
+      <i style="width:${pfTotalTx ? pfHit / pfTotalTx * 100 : 0}%;background:linear-gradient(90deg,#33d17a,#2dd4bf)"></i></div>
+    <div class="leg" style="margin-top:6px"><span><i style="background:#33d17a"></i>有效预取</span><span><i style="background:#ffb454"></i>未被使用</span></div></div>`);
+
+  cards.push(`<div class="card"><h5>🚌 总线与 L2 活动</h5>
+    <div class="kpi"><span class="v" style="color:#60a5fa">${fmtInt(busR)}</span><span class="u">AXI 读</span>
+      <span class="l">${fmtBytes(busR * 64)} 估算</span></div>
+    <div class="kpi"><span class="v" style="color:#f87171">${fmtInt(busW)}</span><span class="u">AXI 写</span>
+      <span class="l">${fmtBytes(busW * 64)} 估算</span></div>
+    <div class="kpi"><span class="v" style="color:#a78bfa">${fmtInt(l2)}</span><span class="u">L2 CMP</span>
+      <span class="l">阻塞 ${l2 ? (l2stall / l2 * 100).toFixed(1) : 0}%</span></div>
+    <div class="kpi"><span class="v">${fmtInt(demand)}</span><span class="u">需求访存</span>
+      <span class="l">总线/需求 = ${demand ? ((busR + busW) / demand * 100).toFixed(2) : 0}%</span></div></div>`);
+
+  if (typeCnt.size) cards.push(`<div class="card"><h5>🏷 L2C_CMP TYPE 分布 <span class="hint">语义可在 ⚙ 中配置</span></h5>
+    ${hbars(Array.from(typeCnt).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k + (decodeField('L2C_CMP', 'TYPE', k) ? ' · ' + decodeField('L2C_CMP', 'TYPE', k).replace(/\s*\(推测\)/, '') : ''), v]), l2, () => '#a78bfa')}</div>`);
+
+  if (respCnt.size) cards.push(`<div class="card"><h5>📶 L2C_CMP RESP 分布</h5>
+    ${hbars(Array.from(respCnt).sort((a, b) => b[1] - a[1]), l2, () => '#7c5cff')}
+    <div class="dim" style="font-size:10.5px;margin-top:7px;line-height:1.6">RESP 为位向量，含义请在字段语义配置中按 RTL 定义。</div></div>`);
+
+  cards.push(`<div class="card"><h5>🔥 热点 PC <span class="hint">按需求访存次数</span></h5>
+    ${hbars(Array.from(pcCnt).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([p, v]) => ['0x' + p.toString(16).padStart(4, '0'), v]), demand, k => hashColor('pc' + parseInt(k, 16)))}</div>`);
+
+  cards.push(`<div class="card"><h5>📍 热点 Cacheline</h5>
+    ${hbars(Array.from(lineCnt).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([a, v]) => ['0x' + a.toString(16).padStart(10, '0'), v]), FILT.n, () => '#22d3ee')}</div>`);
+
+  cards.push(histCard('⏱ 需求发起 → 总线请求 (cycle)', d2bV, 'cyc', '#60a5fa'));
+  cards.push(histCard('⏱ 总线请求 → 数据写回 (cycle)', b2wV, 'cyc', '#4ade80'));
+  cards.push(histCard('⏱ 预取提前量 (cycle)', leadV, 'cyc', '#f472b6'));
+  cards.push(histCard('⏱ 事务持续时长 (cycle)', durV, 'cyc', '#a78bfa'));
+
+  if (strideRows.length) cards.push(`<div class="card" style="grid-column:span 2"><h5>📐 每 PC 访存步幅 <span class="hint">相邻两次访问的 cacheline 地址差，步幅稳定的 PC 最适合步幅预取</span></h5>
+    <table class="gr" style="font-size:11px"><thead><tr><th>PC</th><th>访存次数</th><th>主导步幅</th><th>占比</th><th>次要步幅</th></tr></thead><tbody>
+    ${strideRows.map(r => {
+      const t0s = r.top[0];
+      return `<tr><td style="color:${hashColor('pc' + r.pc)}">0x${r.pc.toString(16).padStart(4, '0')}</td>
+        <td>${fmtInt(r.n)}</td>
+        <td>${t0s ? (t0s[0] > 0 ? '+' : '') + t0s[0] + ' B' + (Math.abs(t0s[0]) % 64 === 0 ? ` (${t0s[0] / 64} 行)` : '') : '—'}</td>
+        <td>${t0s ? (t0s[1] / r.tot * 100).toFixed(0) + '%' : '—'}</td>
+        <td class="dim">${r.top.slice(1).map(s => (s[0] > 0 ? '+' : '') + s[0]).join(', ') || '—'}</td></tr>`;
+    }).join('')}</tbody></table></div>`);
+
+  host.innerHTML = cards.join('');
+  void t0;
+}
+$('#bAnRefresh').onclick = renderAnalytics;
+
+/* ============================ DATA SOURCES UI ============================ */
+function afterLoad(fit) {
+  detectPeriod();
+  $('#inPeriod').value = S.periodAuto || 1;
+  FILT.invalidate(); OV.key = ''; ADDR.rankKey = ''; VP.yInit = false;
+  renderTagList();
+  if (fit) { if (S.n > 20000) VP.last(3000); else VP.fit(); }
+  $('#welcome').classList.add('hide');
+  $('#bLive').disabled = !Src.live;
+  requestDraw(); refreshActivePane();
+}
+function toast(msg, bad) {
+  $('#stText').textContent = msg;
+  $('#stDot').className = 'dot ' + (bad ? 'err' : '');
+  console[bad ? 'error' : 'log'](msg);
+}
+
+/* --- open with live follow ---
+ * Three environments, three behaviours:
+ *   1. Secure, non-file:// context  → FileSystemAccess API: real incremental follow.
+ *   2. localhost HTTP               → openUrl + Range polling: real incremental follow.
+ *   3. file:// (double-clicked HTML)→ FSA hangs, fetch() is CORS-blocked, and a File
+ *      picked via <input type=file> becomes unreadable once the trace grows. The only
+ *      viable "follow" is SEMI-automatic: load a full snapshot, then re-open the picker
+ *      on a timer; the user re-selects the same file and we append just the new bytes.
+ *      A banner makes this explicit and points to `serve.py` for hands-free follow. */
+let fileInputMode = 'static';          // 'static' | 'live'
+let liveReady = false;                 // follow session established (later picks are incremental)
+let followTimer = null;                // file:// semi-auto follow timer
+const FOLLOW_INTERVAL = 4000;          // ms between picker re-prompts on file://
+
+async function openLive() {
+  // FSA only works in a secure, non-file:// context. On file:// its call either rejects
+  // or hangs forever (no picker, no error) — which is exactly the "button does nothing"
+  // symptom. So detect that up front and go to the usable semi-auto path.
+  const fsaUsable = !!window.showOpenFilePicker && window.isSecureContext && location.protocol !== 'file:';
+  if (!fsaUsable) { fallbackLive(); return; }
+  try {
+    const [h] = await window.showOpenFilePicker({
+      mode: 'read',
+      types: [{ description: 'Trace files', accept: { 'text/plain': ['.txt', '.log', '.trace', '.out'] } }],
+      multiple: false,
+    });
+    stopFollowTimer();
+    toast('正在读取…');
+    await Src.openHandle(h);
+    afterLoad(true);
+    Src.live = true;
+    showFollowBanner(false);
+    toast('实时跟进已启动');
+  } catch (e) {
+    if (e.name === 'AbortError') return;                 // user cancelled the picker
+    fallbackLive();                                       // blocked → semi-auto fallback
+  }
+}
+/* file:// (or otherwise FSA-blocked) follow: open the picker; the onchange handler does
+ * a full load on the first pick, then starts the periodic re-open timer. */
+function fallbackLive() {
+  fileInputMode = 'live';
+  liveReady = false;
+  $('#fileInput').click();
+}
+/* periodic re-open of the native picker so the user can re-select the same file and
+ * feed the appended bytes. Skipped while the tab is hidden or following is paused. */
+function startFollowTimer() {
+  stopFollowTimer();
+  followTimer = setInterval(() => {
+    if (document.hidden || Src.paused) return;
+    fileInputMode = 'live';
+    $('#fileInput').click();
+  }, FOLLOW_INTERVAL);
+}
+function stopFollowTimer() { if (followTimer) { clearInterval(followTimer); followTimer = null; } }
+
+/* banner shown while a follow session is active (FSA/http = automatic, file:// = semi) */
+function showFollowBanner(isFileFollow) {
+  const b = $('#followBanner');
+  b.classList.add('on');
+  b.classList.toggle('semi', !!isFileFollow);
+  $('#followTitle').textContent = isFileFollow ? '半自动跟随 · file://' : '实时跟进 · 只读';
+  $('#followTxt').innerHTML = isFileFollow
+    ? '仿真器写入新行后，<b>重新选择同一 trace 文件</b>即自动追加显示。想完全免手动？在 trace 目录运行 <code>python3 serve.py</code>，再打开它给的 <code>http://localhost:8777/</code>。'
+    : '实时跟进中：以只读方式监控文件，自动增量读取仿真器新写入的行。';
+  $('#bFollowCheck').style.display = isFileFollow ? '' : 'none';
+  $('#bFollowPause').textContent = Src.paused ? '▶ 继续跟随' : '⏸ 暂停跟随';
+}
+function hideFollowBanner() { $('#followBanner').classList.remove('on'); }
+
+/* stop any active follow (FSA/http timer or file:// semi-auto timer) */
+function stopFollow() {
+  stopFollowTimer();
+  Src.stop();
+  liveReady = false;
+  fileInputMode = 'static';
+  hideFollowBanner();
+  $('#bLive').disabled = !Src.live;
+}
+
+$('#bOpenLive').onclick = openLive;
+$('#wLive').onclick = openLive;
+$('#bFollowCheck').onclick = () => { if (liveReady) { fileInputMode = 'live'; $('#fileInput').click(); } };
+$('#bFollowPause').onclick = () => $('#bLive').click();
+$('#bFollowStop').onclick = stopFollow;
+
+/* --- static file --- */
+$('#bOpenFile').onclick = () => { stopFollow(); $('#fileInput').click(); };
+$('#wFile').onclick = () => { stopFollow(); $('#fileInput').click(); };
+$('#fileInput').onchange = async e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) {
+    if (fileInputMode === 'live' && liveReady) return;   // picker dismissed without a pick → keep following
+    fileInputMode = 'static'; return;
+  }
+  if (fileInputMode === 'live') {
+    if (!liveReady) {
+      // first pick of the follow session → full load, then arm the periodic re-open
+      await loadStatic(f);
+      liveReady = true; Src.live = true;
+      startFollowTimer(); showFollowBanner(true);
+      toast('半自动跟随已启动：到点后重新选择同一文件即可载入新增数据（或点本栏「立即检查」）');
+    } else {
+      // subsequent pick (timer-triggered) → append only the new bytes
+      toast('载入新增数据…');
+      const added = await Src.loadFileIncremental(f, (o, t) => { $('#stText').textContent = `追加中 ${(o / t * 100).toFixed(0)}%`; updateSideStats(); });
+      if (added > 0) { afterLoad(false); toast(`已追加 ${fmtInt(added)} 条新事件（共 ${fmtInt(S.n)}）`); }
+      else { toast('暂无新增数据'); }
+    }
+  } else {
+    await loadStatic(f);
+  }
+  // NB: fileInputMode stays 'live' across picks; the timer re-sets it before each click.
+};
+async function loadStatic(f) {
+  stopFollowTimer();
+  toast(`解析 ${f.name} …`);
+  $('#welcome').classList.add('hide');
+  await Src.loadFile(f, (o, t) => { $('#stText').textContent = `解析中 ${(o / t * 100).toFixed(0)}%  (${fmtBytes(o)})`; updateSideStats(); });
+  afterLoad(true);
+  toast(`已载入 ${fmtInt(S.n)} 条事件 · ${S.parseMs.toFixed(0)} ms`);
+}
+
+/* --- URL --- */
+$('#bOpenUrl').onclick = () => { openModal('mUrl'); $('#inUrl').focus(); };
+$('#bUrlGo').onclick = async () => {
+  const u = $('#inUrl').value.trim();
+  if (!u) return;
+  closeModal('mUrl');
+  toast('连接中…');
+  try {
+    await Src.openUrl(u, $('#ckUrlLive').checked);
+    afterLoad(true);
+    toast($('#ckUrlLive').checked ? 'HTTP 实时跟进已启动' : '已载入');
+  } catch (e) { toast('连接失败: ' + e.message, true); }
+};
+
+/* --- drag & drop --- */
+const dz = $('#drop');
+let dragDepth = 0;
+addEventListener('dragenter', e => { e.preventDefault(); if (++dragDepth === 1) dz.classList.add('on'); });
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('dragleave', e => { e.preventDefault(); if (--dragDepth <= 0) { dragDepth = 0; dz.classList.remove('on'); } });
+addEventListener('drop', async e => {
+  e.preventDefault(); dragDepth = 0; dz.classList.remove('on');
+  const it = e.dataTransfer.items && e.dataTransfer.items[0];
+  if (it && it.getAsFileSystemHandle) {                       // keep live capability if possible
+    try {
+      const h = await it.getAsFileSystemHandle();
+      if (h && h.kind === 'file') {
+        toast('正在读取…');
+        await Src.openHandle(h); afterLoad(true);
+        toast('实时跟进已启动（拖入文件句柄）'); return;
+      }
+    } catch (err) { /* fall through to plain file */ }
+  }
+  const f = e.dataTransfer.files[0];
+  if (f) await loadStatic(f);
+});
+
+/* --- live controls --- */
+$('#bLive').onclick = () => {
+  Src.paused = !Src.paused;
+  $('#bLive').textContent = Src.paused ? '▶ 继续' : '⏸ 暂停';
+  $('#bLive').classList.toggle('rec', Src.paused);
+  const fb = $('#followBanner');
+  if (fb.classList.contains('on')) $('#bFollowPause').textContent = Src.paused ? '▶ 继续跟随' : '⏸ 暂停跟随';
+  updateStatus();
+};
+Bus.on('append', () => {
+  OV.key = '';
+  if ($('#ckFollow').checked) VP.followLatest();
+  renderTagList();
+  requestDraw();
+  const p = $('.tab.on')?.dataset.pane;
+  if (p === 'tbl' && $('#ckTblFollow').checked) {
+    renderTable();
+    $('#tblScroll').scrollTop = $('#vtable').clientHeight;
+  } else if (p === 'txn') { TXN.key = ''; renderTxn(); }
+  else if (p === 'an') scheduleAnalytics();
+});
+Bus.on('reset', () => { SEL.ev = -1; SEL.line = -1; FILT.invalidate(); OV.key = ''; ADDR.rankKey = ''; toast('检测到文件被重写，已重新开始'); });
+Bus.on('srcerr', m => toast('轮询错误: ' + m, true));
+
+/* --------------------------- schema modal ------------------------------- */
+$('#bSchema').onclick = () => { $('#taSchema').value = JSON.stringify(SCHEMA, null, 2); openModal('mSchema'); };
+$('#bSchemaSave').onclick = () => {
+  try {
+    SCHEMA = JSON.parse($('#taSchema').value);
+    localStorage.setItem('trace.schema', JSON.stringify(SCHEMA));
+    closeModal('mSchema'); renderDetail(); refreshActivePane();
+    toast('字段语义已保存');
+  } catch (e) { alert('JSON 解析失败：' + e.message); }
+};
+$('#bSchemaReset').onclick = () => { $('#taSchema').value = JSON.stringify(DEFAULT_SCHEMA, null, 2); };
+
+/* ------------------------------- help ----------------------------------- */
+$('#bHelp').onclick = () => { $('#helpBody').innerHTML = HELP_HTML; openModal('mHelp'); };
+
+/* ------------------------------- about ---------------------------------- */
+$('#bAbout').onclick = () => { renderAbout(); openModal('mAbout'); };
+function renderAbout() {
+  $('#aboutVer').textContent = 'v' + APP_VERSION;
+  $('#aboutBody').innerHTML = `
+    <div class="aboutp">
+      <b>Memory Trace Pipeline Viewer</b> — CPU 访存 trace 流水线可视化 / 实时跟进工具。
+      把 <code>Time;Tag;K:V;…</code> 格式的仿真访存 trace 以流水泳道呈现
+      LSU → L2C → 预取器 → 总线 的完整数据流，可随仿真器写入实时跟进（全程只读）。
+    </div>
+    <div class="dsec">版本与变更记录</div>
+    <div id="changelog">${APP_CHANGELOG.map(c => `
+      <div class="rel">
+        <div class="relh"><span class="rv">v${esc(c.v)}</span><span class="rd">${esc(c.date)}</span></div>
+        <ul>${c.items.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+      </div>`).join('')}</div>
+    <div class="dsec">文档</div>
+    <div class="aboutp">开发文档、使用说明、特性说明与变更记录见交付目录下的
+      <code>DEV.md</code> / <code>USAGE.md</code> / <code>FEATURES.md</code> / <code>CHANGELOG.md</code>。</div>`;
+}
+const HELP_HTML = `
+<h5>trace 格式</h5>
+每行一个事件：<code>&lt;时间&gt;;&lt;Tag&gt;;KEY:VAL;KEY:VAL;…</code>，例如
+<code>105850000;BIU_PAD_AR;ADDL:0000000000;PC:0000;…</code>。
+解析器完全按数据驱动：任何新的 Tag 与字段都会自动出现在泳道与表格里，无需改代码。
+<code>ADDL</code>（cacheline 首地址）是串起整条流水的主键，<code>PC</code>、<code>IID</code> 用于关联指令。
+
+<h5>三种打开方式</h5>
+<table>
+<tr><th>方式</th><th>是否实时</th><th>要求</th></tr>
+<tr><td>📡 打开并实时跟进</td><td>是，增量读取新追加的行</td><td>页面运行在 https 或 localhost（用 <code>serve.py</code> 起服务）</td></tr>
+<tr><td>🌐 URL</td><td>是，HTTP Range 轮询</td><td>服务器支持范围请求</td></tr>
+<tr><td>📂 载入文件 / 拖拽</td><td>否，一次性</td><td>任意环境，含 <code>file://</code></td></tr>
+</table>
+全程<b>只读</b>：只调用只读文件句柄与 GET 请求，绝不会写回 trace 文件，不影响仿真器。
+若仿真器把文件截断重写，前端会自动检测并从头开始。
+
+<h5>视图</h5>
+<b>🔗 流水线</b>　横轴时间、纵轴按 CORE → L2 → PF → BUS 分组的泳道。
+同一 cacheline 的相邻事件之间画带箭头的连线，于是一次访存如何从 LSU 流到 L2、触发预取、发到总线、再写回，一眼可见。
+顶部密度条是全局缩略图，拖动即可定位。<br>
+<b>📈 地址-时间</b>　横轴时间、纵轴 cacheline 地址。步幅/流式访问会呈现为斜线；预取点（三角）跑在需求点前面多远，直接反映及时性。<br>
+<b>🧾 事务生命周期</b>　按 cacheline 聚合成事务，给出预取提前量、发起→总线、总线→写回等延迟，可排序、可导出 CSV。<br>
+<b>📊 分析</b>　预取准确率/覆盖率/及时性、总线流量、热点 PC 与 cacheline、每 PC 步幅分布、各类延迟直方图。
+
+<h5>操作</h5>
+<table>
+<tr><th>操作</th><th>效果</th></tr>
+<tr><td>滚轮</td><td>以光标为锚缩放时间轴</td></tr>
+<tr><td>Ctrl+滚轮（地址视图）</td><td>缩放地址轴</td></tr>
+<tr><td>Shift+滚轮（流水线）</td><td>纵向滚动泳道</td></tr>
+<tr><td>拖拽</td><td>平移</td></tr>
+<tr><td>Shift+拖拽（流水线）</td><td>框选时间区间并放大</td></tr>
+<tr><td>单击事件</td><td>选中；高亮其 cacheline 的全部流水事件</td></tr>
+<tr><td>双击</td><td>全览</td></tr>
+<tr><td><kbd>+</kbd> <kbd>-</kbd> <kbd>←</kbd> <kbd>→</kbd></td><td>缩放 / 平移</td></tr>
+<tr><td><kbd>F</kbd> / <kbd>L</kbd></td><td>全览 / 跳到最新 2000 周期</td></tr>
+<tr><td><kbd>/</kbd></td><td>聚焦搜索框</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>清除选中</td></tr>
+</table>
+
+<h5>搜索语法</h5>
+支持 <code>pc=1e88</code>、<code>addr=00000ede00</code>、<code>iid=05</code>、<code>tag=L2C</code>，或直接输入任意子串做全字段匹配。
+
+<h5>字段语义（⚙）</h5>
+TYPE / RESP / SRC 这类编码的含义随 RTL 而变，工具内置的默认解释是<b>基于数据统计的推测</b>。
+点 ⚙ 可用 JSON 定义每个字段的进制、one-hot 位名和枚举值；保存后详情面板与分析页会用你的定义显示。配置存在浏览器本地。
+
+<h5>时间轴</h5>
+时钟周期由相邻时间戳差值的众数自动推断（本 trace 为 100000 tick），可在左栏「周期长度」手动修正；
+X 轴可切换为周期数或实际时间。`;
+
+/* ---------------------------- demo data --------------------------------- */
+function genDemo() {
+  const L = [];
+  let t = 100000000;
+  const P = 100000;
+  const push = (dt, s) => { t += dt * P; L.push(`${String(t).padStart(22)};${s}`); };
+  const hx = (v, w) => (v >>> 0).toString(16).padStart(w, '0');
+  const h40 = v => v.toString(16).padStart(10, '0');
+
+  let base = 0x2000, pfAhead = 0;
+  for (let iter = 0; iter < 620; iter++) {
+    for (let j = 0; j < 8; j++) {
+      const addr = base + j * 64;
+      const line = addr & ~63;
+      const iid = (iter * 8 + j) & 0x7f;
+      const pc = 0x1ea8;
+      push(1, `LSU_LD_PIPE3;PC:${hx(pc, 4)};PREG:${hx((iid % 60) + 1, 2)};ADDL:${h40(line)};ADDB:${h40(addr & ~15)};ABYTE:${h40(addr)};IID:${hx(iid, 2)};LCHe:001;SRC0:${h40(addr).padStart(16, '0')};SRC1:0000000000000000;OFF:000;`);
+      const miss = (j === 0);
+      push(1, `L2C_CMP;ADDL:${h40(line)};SID:${hx(iter % 32, 2)};TYPE:0010;SRC:00;CLCP:0;STCP:0;FATA:0;WRAW:0;HPCP:${miss ? 1 : 0};MID:0;FROM:5;PC:${hx(pc, 4)};CP:0;RESP:${miss ? '00001' : '10101'};STAL:${miss ? 1 : 0};WRIT:0;`);
+      if (miss) {
+        push(1, `L2_TriPF;ADDL:${h40(line)};PC:${hx(pc, 4)};REQS:02;`);
+        pfAhead = line + 64 * 4;
+        push(1, `TriPF_L2;ADDL:${h40(pfAhead)};REQS:1;READY:${Math.random() < .1 ? 0 : 1};`);
+        push(2, `BIU_PAD_AR;USER:2;SNOP:1;SIZE:4;PROT:3;LOCK:0;LENG:3;ARID:${hx(iter % 24, 2)};DOMA:1;CACH:f;BURS:2;BARR:2;ADDL:${h40(line)};ADDB:${h40(line)};ADDR:${h40(line)};FROM:3;PC:${hx(pc, 4)};`);
+        push(18 + Math.floor(Math.random() * 26), `LSU_LD_WB_pg;FROM:RB;PREG:${hx((iid % 60) + 1, 2)};ADDL:${h40(line)};ADDB:${h40(addr & ~15)};ABYTE:${h40(addr)};DATA:${h40(addr ^ 0x5a5a)};IID:${hx(iid, 2)};`);
+      } else {
+        push(1, `LSU_LD_DA_fwd;PC:${hx(pc, 4)};PREG:${hx((iid % 60) + 1, 2)};ADDL:${h40(line)};ADDB:${h40(addr & ~15)};ABYTE:${h40(addr)};DATA:${h40(addr ^ 0x5a5a)};IID:${hx(iid, 2)};`);
+        push(1, `LSU_LD_WB_pg;FROM:DA;PREG:${hx((iid % 60) + 1, 2)};ADDL:${h40(line)};ADDB:${h40(addr & ~15)};ABYTE:${h40(addr)};DATA:${h40(addr ^ 0x5a5a)};IID:${hx(iid, 2)};`);
+      }
+      if (j % 3 === 2) {
+        const sa = 0x40000 + iter * 32 + j * 8;
+        push(1, `LSU_ST_PIPE4;PC:1e88;CODE:00f72023;TYPE:0;SIZE:2;MODE:0;ATOM:0;ADDL:${h40(sa & ~63)};ADDB:${h40(sa & ~15)};ABYTE:${h40(sa)};IID:${hx((iid + 3) & 0x7f, 2)};LCHe:002;SDIQ:001;MMUr:1;`);
+        push(1, `L2C_CMP;ADDL:${h40(sa & ~63)};SID:${hx((iter + 7) % 32, 2)};TYPE:0040;SRC:00;CLCP:0;STCP:1;FATA:0;WRAW:1;HPCP:0;MID:0;FROM:6;PC:1e88;CP:0;RESP:10001;STAL:0;WRIT:1;`);
+        if (iter % 5 === 0) push(2, `BIU_PAD_AW;ADDL:${h40(sa & ~63)};ADDB:${h40(sa & ~15)};ADDR:${h40(sa & ~15)};BARR:0;BURS:1;CACH:f;DOMA:1;AWID:0b;LENG:3;LOCK:0;PROT:3;SIZE:4;SNOP:1;UNIQ:0;USER:1;FROM:6;PC:1e88;`);
+      }
+    }
+    base += 512;
+    if (iter % 90 === 89) base = 0x2000 + ((iter / 90) | 0) * 0x8000;   // stream restart
+  }
+  return L.join('\n') + '\n';
+}
+$('#wDemo').onclick = async () => {
+  toast('生成示例数据…');
+  $('#welcome').classList.add('hide');
+  Src.clear(); S.reset();
+  Src.kind = 'static'; Src.name = 'demo_trace.txt';
+  const txt = genDemo();
+  Src.size = txt.length; Src.offset = txt.length;
+  parseChunk(txt);
+  S.bytes = txt.length;
+  afterLoad(true);
+  toast(`示例数据已生成 · ${fmtInt(S.n)} 条事件`);
+};
+
+/* ------------------------------ boot ------------------------------------ */
+/* expose internals for DevTools poking: TV.S / TV.FILT / TV.VP … */
+window.TV = { S, VP, FILT, SEL, Src, Bus, LANES: () => LANES, buildTxns, txnClass,
+  get schema() { return SCHEMA; }, redraw: requestDraw, version: APP_VERSION };
+window.S = S;                      // convenience alias
+
+/* version stamping */
+document.title = `Memory Trace Pipeline Viewer v${APP_VERSION}`;
+$('#verBadge').textContent = 'v' + APP_VERSION;
+$('#stVer').textContent = 'v' + APP_VERSION;
+$('#aboutVer').textContent = 'v' + APP_VERSION;
+
+new ResizeObserver(() => requestDraw()).observe($('#panes'));
+addEventListener('resize', () => requestDraw());
+renderTagList();
+updateStatus();
+setInterval(() => { if (Src.live) updateStatus(); }, 1000);
+
+/* auto-connect: ?url=… &live=1 */
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const u = q.get('url') || q.get('trace');
+  if (u) {
+    $('#welcome').classList.add('hide');
+    toast('连接 ' + u + ' …');
+    try { await Src.openUrl(u, q.get('live') !== '0'); afterLoad(true); toast('已连接'); }
+    catch (e) { toast('连接失败: ' + e.message, true); $('#welcome').classList.remove('hide'); }
+  }
+})();
+requestDraw();
+
+</script>
+</body>
+</html>

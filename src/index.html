@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Memory Trace Pipeline Viewer</title>
+<meta name="version" content="<!--APP_VERSION-->">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234da3ff'/%3E%3Cpath d='M8 10h4v12H8zm6 0h4v12h-4zm6 0h4v12h-4z' fill='%23fff'/%3E%3C/svg%3E">
+<!--INLINE_CSS-->
+</head>
+<body>
+<div id="app">
+
+  <!-- ======================= TOP BAR ======================= -->
+  <div id="top">
+    <div id="logo">
+      <div class="lg">⛓</div>
+      <div>Trace Pipeline Viewer<br><small>CPU memory-access trace · live follow</small></div>
+      <span class="ver" id="verBadge" title="版本号">v—</span>
+    </div>
+    <div class="sep"></div>
+    <button class="btn pri" id="bOpenLive" title="以只读方式跟进 trace：localhost 下自动增量；file:// 下每 4 秒提示重新选择文件以追加新行">📡 打开并实时跟进</button>
+    <button class="btn" id="bOpenFile" title="一次性载入文件做离线分析">📂 载入文件</button>
+    <button class="btn" id="bOpenUrl" title="通过 HTTP Range 轮询远端/本地服务器上的 trace">🌐 URL</button>
+    <div class="sep"></div>
+    <button class="btn" id="bLive" disabled title="暂停 / 继续 实时跟进">⏸ 暂停</button>
+    <label class="ck" style="margin-left:2px" title="视图自动滚动到最新时间"><input type="checkbox" id="ckFollow" checked><span class="muted">跟随</span></label>
+    <select id="selPoll" title="轮询间隔" style="width:82px">
+      <option value="250">250 ms</option>
+      <option value="500" selected>500 ms</option>
+      <option value="1000">1 s</option>
+      <option value="2000">2 s</option>
+      <option value="5000">5 s</option>
+    </select>
+    <div class="grow"></div>
+    <input type="text" id="qSearch" placeholder="搜索 pc / addr / 任意字段…" style="width:210px" title="全局过滤，支持 pc=1e88、addr=00000ede00、iid=05 或纯文本">
+    <button class="btn" id="bSide" title="侧栏">◧</button>
+    <button class="btn" id="bDetail" title="详情面板">◨</button>
+    <button class="btn" id="bSchema" title="字段语义配置">⚙</button>
+    <button class="btn" id="bAbout" title="关于 / 更新日志">ⓘ</button>
+    <button class="btn" id="bHelp" title="帮助">?</button>
+  </div>
+
+  <!-- ======================= FOLLOW BANNER ======================= -->
+  <div id="followBanner" class="follow-banner" role="status">
+    <span class="ic">📡</span>
+    <div class="ftxt"><b id="followTitle">实时跟进</b><span id="followTxt"></span></div>
+    <div class="fbtns">
+      <button class="btn sm" id="bFollowCheck" title="立即重新选择文件以检查新增数据">⟳ 立即检查</button>
+      <button class="btn sm" id="bFollowPause" title="暂停 / 继续 跟随">⏸ 暂停跟随</button>
+      <button class="btn sm" id="bFollowStop" title="停止跟随">✕ 停止</button>
+    </div>
+  </div>
+
+  <!-- ======================= MIDDLE ======================= -->
+  <div id="mid">
+
+    <!-- ---------- sidebar ---------- -->
+    <div id="side">
+      <div class="grp" id="gSrc"><h4><span class="cv">▼</span>数据源<span class="cnt" id="srcCnt"></span></h4>
+        <div class="bd">
+          <div class="stat"><span class="muted">文件</span><b id="sFile" class="dim">—</b></div>
+          <div class="stat"><span class="muted">模式</span><b id="sMode" class="dim">—</b></div>
+          <div class="stat"><span class="muted">已读</span><b id="sBytes">0 B</b></div>
+          <div class="stat"><span class="muted">事件数</span><b id="sEvents">0</b></div>
+          <div class="stat"><span class="muted">时间跨度</span><b id="sSpan">—</b></div>
+          <div class="stat"><span class="muted">周期</span><b id="sPeriod">—</b></div>
+          <div class="row" style="margin-top:9px">
+            <span>时间单位</span>
+            <select id="selUnit" style="flex:1">
+              <option value="1">原始 tick</option>
+              <option value="fs">fs</option><option value="ps" selected>ps</option>
+              <option value="ns">ns</option><option value="us">us</option>
+            </select>
+          </div>
+          <div class="row"><span>X 轴</span>
+            <select id="selXAxis" style="flex:1">
+              <option value="cycle" selected>周期 cycle</option>
+              <option value="time">仿真时间</option>
+            </select>
+          </div>
+          <div class="row"><span>周期长度</span><input type="number" id="inPeriod" min="1" step="1" title="一个时钟周期对应多少 tick，自动检测，可手改"></div>
+        </div>
+      </div>
+
+      <div class="grp" id="gTags"><h4><span class="cv">▼</span>事件类型 / 泳道<span class="cnt" id="tagCnt"></span></h4>
+        <div class="bd">
+          <div style="display:flex;gap:5px;margin-bottom:7px">
+            <button class="btn sm grow" id="bTagAll">全选</button>
+            <button class="btn sm grow" id="bTagNone">全不选</button>
+            <button class="btn sm grow" id="bTagInv">反选</button>
+          </div>
+          <div id="tagList"></div>
+        </div>
+      </div>
+
+      <div class="grp" id="gFilter"><h4><span class="cv">▼</span>过滤器</h4>
+        <div class="bd">
+          <div class="row"><span>PC</span><input type="text" id="fPC" placeholder="1e88,1ea8" class="mono"></div>
+          <div class="row"><span>Cacheline</span><input type="text" id="fAddr" placeholder="00000ede00" class="mono"></div>
+          <div class="row"><span>地址 ≥</span><input type="text" id="fAddrLo" placeholder="0x0" class="mono"></div>
+          <div class="row"><span>地址 &lt;</span><input type="text" id="fAddrHi" placeholder="0xffffffffff" class="mono"></div>
+          <div class="row"><span>IID</span><input type="text" id="fIID" placeholder="05" class="mono"></div>
+          <label class="ck" style="margin:9px 0 3px"><input type="checkbox" id="ckOnlySel"><span class="muted">仅显示选中 cacheline 的事件</span></label>
+          <button class="btn sm" id="bClrFilter" style="width:100%;justify-content:center;margin-top:7px">清空过滤器</button>
+          <div class="stat" style="margin-top:8px"><span class="muted">命中</span><b id="fHit">—</b></div>
+        </div>
+      </div>
+
+      <div class="grp col" id="gSel"><h4><span class="cv">▼</span>选中 Cacheline</h4>
+        <div class="bd" id="selBox"><div class="dim" style="font-size:11.5px">点击任意事件以追踪其 cacheline 的完整流水生命周期</div></div>
+      </div>
+
+      <div class="grp" id="gView"><h4><span class="cv">▼</span>视图选项</h4>
+        <div class="bd">
+          <label class="ck" style="margin:5px 0"><input type="checkbox" id="ckLinks" checked><span class="muted">绘制流水连接线</span></label>
+          <label class="ck" style="margin:5px 0"><input type="checkbox" id="ckIIDLink" checked><span class="muted">LSU 内 IID 关联线</span></label>
+          <label class="ck" style="margin:5px 0"><input type="checkbox" id="ckGrid" checked><span class="muted">时间网格</span></label>
+          <label class="ck" style="margin:5px 0"><input type="checkbox" id="ckLabels" checked><span class="muted">事件标签（PC/地址）</span></label>
+          <label class="ck" style="margin:5px 0"><input type="checkbox" id="ckDensity" checked><span class="muted">缩得过小时聚合为密度条</span></label>
+          <div class="row"><span>连线窗口</span><input type="number" id="inLinkWin" value="4000" step="500" title="同一 cacheline 两事件间隔超过该周期数则不连线"></div>
+          <div class="row"><span>事件大小</span><input type="range" id="inSize" min="2" max="9" value="4" style="flex:1"></div>
+        </div>
+      </div>
+
+      <div class="grp col" id="gPerf"><h4><span class="cv">▼</span>内存 / 性能</h4>
+        <div class="bd">
+          <div class="stat"><span class="muted">解析耗时</span><b id="pParse">—</b></div>
+          <div class="stat"><span class="muted">渲染帧</span><b id="pFrame">—</b></div>
+          <div class="stat"><span class="muted">可见事件</span><b id="pVis">—</b></div>
+          <div class="row"><span>保留上限</span>
+            <select id="selCap" style="flex:1">
+              <option value="0" selected>不限</option>
+              <option value="500000">50 万条</option>
+              <option value="2000000">200 万条</option>
+              <option value="5000000">500 万条</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- main ---------- -->
+    <div id="main">
+      <div id="tabs">
+        <div class="tab on" data-pane="pipe">🔗 流水线</div>
+        <div class="tab" data-pane="addr">📈 地址-时间</div>
+        <div class="tab" data-pane="txn">🧾 事务生命周期</div>
+        <div class="tab" data-pane="tbl">📋 事件表</div>
+        <div class="tab" data-pane="an">📊 分析</div>
+      </div>
+
+      <div id="panes">
+        <!-- pipeline -->
+        <div class="pane on" data-pane="pipe">
+          <div class="vtool">
+            <span class="lb">缩放</span>
+            <button class="btn sm" id="bZoomOut">−</button><button class="btn sm" id="bZoomIn">+</button>
+            <button class="btn sm" id="bZoomFit">全览</button>
+            <button class="btn sm" id="bZoomLast">最新 2k cycle</button>
+            <div class="sep"></div>
+            <span class="lb" id="lbWin">—</span>
+            <div class="grow"></div>
+            <span class="lb">滚轮=缩放 · 拖拽=平移 · Shift+拖拽=框选 · 点击=选中</span>
+          </div>
+          <div id="ovwrap"><canvas id="cvOv"></canvas><canvas id="cvOvH" class="hit"></canvas></div>
+          <div class="cvwrap" id="pipeWrap"><canvas id="cvPipe"></canvas><canvas id="cvPipeH" class="hit"></canvas></div>
+        </div>
+
+        <!-- address / time -->
+        <div class="pane" data-pane="addr">
+          <div class="vtool">
+            <span class="lb">Y 轴</span>
+            <select id="selAddrMode" style="width:150px">
+              <option value="rank" selected>压缩（按地址排名）</option>
+              <option value="linear">线性地址</option>
+            </select>
+            <span class="lb">着色</span>
+            <select id="selColor" style="width:120px">
+              <option value="tag" selected>事件类型</option>
+              <option value="pc">PC</option>
+              <option value="src">需求 / 预取</option>
+            </select>
+            <div class="sep"></div>
+            <label class="ck"><input type="checkbox" id="ckPFLine" checked><span class="muted">预取→命中连线</span></label>
+            <label class="ck"><input type="checkbox" id="ckStride"><span class="muted">同 PC 步幅连线</span></label>
+            <div class="grow"></div>
+            <span class="lb">滚轮=缩放时间 · Ctrl+滚轮=缩放地址 · 拖拽=平移</span>
+          </div>
+          <div class="cvwrap" id="addrWrap"><canvas id="cvAddr"></canvas><canvas id="cvAddrH" class="hit"></canvas></div>
+        </div>
+
+        <!-- transactions -->
+        <div class="pane" data-pane="txn">
+          <div class="vtool">
+            <span class="lb">拆分间隔 &gt;</span><input type="number" id="inTxnGap" value="3000" step="500" style="width:88px" title="同一 cacheline 相邻事件间隔超过该周期数则视为新事务">
+            <span class="lb">cycle</span>
+            <div class="sep"></div>
+            <select id="selTxnFilter" style="width:170px">
+              <option value="all">全部事务</option>
+              <option value="miss">含总线访问（L2 miss）</option>
+              <option value="pf">含预取</option>
+              <option value="pfhit">预取命中（有效预取）</option>
+              <option value="pfwaste">无效预取</option>
+            </select>
+            <div class="grow"></div>
+            <span class="lb" id="txnCnt">—</span>
+            <button class="btn sm" id="bTxnCsv">导出 CSV</button>
+          </div>
+          <div class="tblwrap"><table class="gr" id="tTxn"><thead></thead><tbody></tbody></table></div>
+        </div>
+
+        <!-- event table -->
+        <div class="pane" data-pane="tbl">
+          <div class="vtool">
+            <span class="lb" id="tblCnt">—</span>
+            <div class="grow"></div>
+            <label class="ck"><input type="checkbox" id="ckTblFollow" checked><span class="muted">跟随最新</span></label>
+            <button class="btn sm" id="bTblCsv">导出 CSV</button>
+          </div>
+          <div class="tblwrap" id="tblScroll">
+            <div class="vtable" id="vtable">
+              <table class="gr" id="tEv" style="position:absolute;left:0;right:0"><thead></thead><tbody></tbody></table>
+              <div class="spacer" id="tblSpacer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- analytics -->
+        <div class="pane" data-pane="an">
+          <div class="vtool">
+            <button class="btn sm" id="bAnRefresh">↻ 重新统计</button>
+            <label class="ck"><input type="checkbox" id="ckAnAuto" checked><span class="muted">自动刷新</span></label>
+            <div class="grow"></div>
+            <span class="lb">统计范围：当前过滤后的全部事件</span>
+          </div>
+          <div class="an"><div class="angrid" id="anGrid"></div></div>
+        </div>
+      </div>
+
+      <!-- welcome -->
+      <div id="welcome">
+        <div class="wc">
+          <h1>CPU 访存 Trace <span>流水线可视化</span></h1>
+          <p>解析 <code style="font-family:var(--mono);color:var(--warn)">Time;Tag;K:V;…</code> 格式的仿真访存 trace，<br>
+             以流水泳道呈现 LSU → L2C → 预取器 → 总线 的完整数据流，并可随仿真器写入实时跟进。</p>
+          <div class="wgrid">
+            <div class="wcard" id="wLive">
+              <div class="ic">📡</div><b>打开并实时跟进</b>
+              <span>以<strong>只读</strong>方式跟进仿真器新写入的行。localhost / https 下<strong>全自动</strong>增量；直接双击打开本页面（file://）时，会<strong>每 4 秒提示你重新选择同一文件</strong>以追加新行，无需手动反复打开。</span>
+            </div>
+            <div class="wcard" id="wFile">
+              <div class="ic">📂</div><b>载入文件（离线）</b>
+              <span>拖拽文件到窗口，或点击选择。一次性解析，适合仿真结束后的复盘分析。任何环境可用。</span>
+            </div>
+            <div class="wcard" id="wDemo">
+              <div class="ic">🎲</div><b>生成示例数据</b>
+              <span>没有 trace？生成一段模拟 openC910 + 预取器行为的数据，立刻体验全部功能。</span>
+            </div>
+          </div>
+          <div class="wnote">
+            <b>要实时跟进？</b> 在 trace 所在目录执行 <code>python3 serve.py</code>，浏览器打开它给出的 <code>http://localhost:8777/</code> 地址，
+            即可使用「打开并实时跟进」或「URL」两种实时模式。全程<strong>只读</strong>，绝不写回 trace 文件。
+          </div>
+        </div>
+      </div>
+
+      <div id="drop"><div class="bx"><div class="ic">📥</div><b>松开以载入 trace 文件</b><div class="muted" style="margin-top:5px">支持 .txt / .log / .trace</div></div></div>
+    </div>
+
+    <!-- ---------- detail ---------- -->
+    <div id="detail">
+      <h3>事件详情</h3>
+      <div id="detailBody"><div class="dim" style="font-size:11.5px;line-height:1.8">在任意视图中点击一个事件<br>可查看其全部字段、译码结果，<br>以及所属 cacheline 的流水链路。</div></div>
+    </div>
+  </div>
+
+  <!-- ======================= STATUS ======================= -->
+  <div id="status">
+    <div class="it"><span class="dot" id="stDot"></span><span id="stText">就绪</span></div>
+    <div class="it" id="stEv"></div>
+    <div class="it" id="stWin"></div>
+    <div class="grow"></div>
+    <div class="it" id="stHover"></div>
+    <div class="it" id="stVer"></div>
+  </div>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<!-- ======================= MODALS ======================= -->
+<div class="modal" id="mUrl"><div class="box">
+  <div class="hd">🌐 通过 URL 实时跟进</div>
+  <div class="bdy">
+    <p class="help" style="margin-top:0">输入 trace 文件的 HTTP(S) 地址。前端使用 <code>Range</code> 请求只拉取新增字节，服务器需支持范围请求（<code>serve.py</code> 已支持）。</p>
+    <input type="text" id="inUrl" class="mono" style="width:100%" placeholder="http://localhost:8777/trace.txt">
+    <label class="ck" style="margin-top:11px"><input type="checkbox" id="ckUrlLive" checked><span class="muted">持续轮询新增内容</span></label>
+  </div>
+  <div class="ft"><button class="btn" data-close="mUrl">取消</button><button class="btn pri" id="bUrlGo">连接</button></div>
+</div></div>
+
+<div class="modal" id="mSchema"><div class="box">
+  <div class="hd">⚙ 字段语义配置 <span class="muted" style="font-weight:400;font-size:11.5px">— 定义字段进制、位域与枚举，译码结果显示在详情面板</span></div>
+  <div class="bdy">
+    <p class="help" style="margin-top:0">JSON 格式。<code>radix</code>=进制(16/10/2)，<code>bits</code>=one-hot 位名数组(索引即位号)，<code>enum</code>=值到含义的映射，<code>desc</code>=字段说明。
+       内置默认值基于本 trace 的统计推断，<strong>请按你的 RTL 实际编码修改</strong>。配置保存在浏览器本地。</p>
+    <textarea id="taSchema" spellcheck="false"></textarea>
+  </div>
+  <div class="ft">
+    <button class="btn" id="bSchemaReset">恢复默认</button><div class="grow"></div>
+    <button class="btn" data-close="mSchema">取消</button><button class="btn pri" id="bSchemaSave">保存</button>
+  </div>
+</div></div>
+
+<div class="modal" id="mHelp"><div class="box">
+  <div class="hd">? 使用说明</div>
+  <div class="bdy help" id="helpBody"></div>
+  <div class="ft"><button class="btn pri" data-close="mHelp">知道了</button></div>
+</div></div>
+
+<div class="modal" id="mAbout"><div class="box">
+  <div class="hd">ⓘ 关于 <span class="muted" style="font-weight:400;font-size:12px" id="aboutVer"></span></div>
+  <div class="bdy" id="aboutBody"></div>
+  <div class="ft"><button class="btn pri" data-close="mAbout">关闭</button></div>
+</div></div>
+
+<input type="file" id="fileInput" accept=".txt,.log,.trace,text/plain" style="display:none">
+<!--INLINE_JS-->
+</body>
+</html>
