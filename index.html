@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CPU 访存 Trace 流水线分析器 v0.07.0</title>
+<title>CPU 访存 Trace 流水线分析器 v0.07.1</title>
 <meta name="author" content="konglingjun">
-<meta name="version" content="0.07.0">
+<meta name="version" content="0.07.1">
 <!-- ============================================================
      CPU 访存 Trace 流水线分析器
      Version : 0.04
@@ -274,7 +274,7 @@ table.st td.num{text-align:right}
 
 <header>
   <div class="logo"><span class="dot"></span>访存 Trace 流水线分析器
-    <span class="ver" id="verTag" title="版本 0.07.0 · 作者 konglingjun">v0.07.0</span></div>
+    <span class="ver" id="verTag" title="版本 0.07.1 · 作者 konglingjun">v0.07.1</span></div>
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开本地Trace</button>
@@ -490,7 +490,7 @@ table.st td.num{text-align:right}
             <option value="reuse">重访间隔分布</option>
           </select>
         </div>
-        <div class="g" id="accAxisWrap"><label class="sw" title="每个不同缓存行占一行，点的水平位置即访问时刻"><input type="checkbox" id="accAxis"> 地址轴按行号</label></div>
+        <div class="g" id="accAxisWrap"><label class="sw" title="每个不同缓存行占一行，点的水平位置即访问时刻"><input type="checkbox" id="accAxis" checked> 地址轴按行号</label></div>
         <div class="g" id="accPcWrap"><label class="sw" title="用细线连接同一 PC 的连续访问（需左侧「关联高亮」设为同PC）；选中事件后高亮其 PC 轨迹"><input type="checkbox" id="pcTraj" checked> 同PC轨迹</label>
           <label class="sw" title="用方框框住选中事件所属 PC 的其它访问（需左侧「关联高亮」设为同PC）"><input type="checkbox" id="pcBox"> 同PC方框</label></div>
         <div class="g" id="accKWrap">Top-N <input class="inp" id="accK" value="40" style="width:54px;padding:2px 5px"></div>
@@ -2741,7 +2741,7 @@ function redraw(){
    数据全部来自 S.visIdx 中含 ADDL 字段的事件，随侧栏过滤实时联动。
    ======================================================================= */
 const ACC={cv:null,cx:null,W:0,H:0,dpr:1,
-  view:'atime',axis:'num',k:40,pcTraj:true,pcBox:false,
+  view:'atime',axis:'row',k:40,pcTraj:true,pcBox:false,
   t0:NaN,t1:NaN,_minC:0,_maxC:1,drag:null,hover:null,_view:undefined,_cs:-1,
   y0:NaN,y1:NaN,                 // 纵轴（地址/缓存行）可见范围；Shift+滚轮缩放
   cache:null,stamp:-1,points:[],grid:null,padL:62,padR:14,padT:30,padB:30};
@@ -3780,6 +3780,13 @@ function bind(){
 
   /* ---- 关于 / 开发报告 / 更新记录 ---- */
   const CHANGELOG=[
+    {v:'0.07.1',date:'2026-08-18',items:[
+      '【示例 Trace 一键加载】主界面工具栏与初始加载页均新增「📁 示例 Trace」按钮，点击弹出示例选择器，列出 example/ 下的 .txt 并选择打开；示例清单由 example/samples.json 登记（相对 example/ 的路径），缺失时回退探测 example/tracesource/trace.txt',
+      '【GitHub Pages 兼容】示例文件路径改为基于当前页面 URL 动态解析（new URL("example/", location.href)），部署到任意仓库名 / 子路径的 GitHub Pages 均能正确加载，无需硬编码仓库名',
+      '【修复】示例按钮误触发文件选择框：初始加载页遮罩 #loader 的全局点击会唤起本地文件对话框，已将示例按钮（btnSamples/btnSamples2）加入排除列表并 stopPropagation，点击示例按钮只弹示例列表',
+      '【修复】示例弹窗渲染报错 esc is not defined：esc 仅定义在其它函数局部作用域，示例模块改用本地转义函数，不再依赖外部 esc',
+      '【默认视图】访存分析·地址-时间视图的「地址轴按行号」复选框默认勾选（ACC.axis 由 num 改为 row），打开即按缓存行分行的点时间序列呈现'
+    ]},
     {v:'0.07.0',date:'2025-08-12',items:[
       '【通用化框架·起步】新增 PROFILE 角色绑定层：将「原始 trace 标签/字段」与「预设通用访存事件（demand-load-issue/da/wb、demand-store-issue、prefetch-req、cache-lookup、bus-read-addr、bus-write-addr 等）」彻底解耦。用户只需在语义字典页（或导入 JSON）把标签/字段绑定到通用事件，标签编码变化后重绑即可复用全部分析逻辑，无需改代码',
       '【通用化框架·起步】buildTxns()/finish() 重写为 PROFILE 驱动：事务组装（load/store/prefetch/line）不再硬编码 9 个标签 + 7 个字段，改为由 PROFILE.roles（addr/id/pc/from/ready 抽象）+ PROFILE.events（match→role 映射）+ PROFILE.txns（stages/key/link 定义）计算；对 openC910 默认 profile 输出与旧版逐字节一致（21/21 测试通过）',
@@ -3921,7 +3928,7 @@ function bind(){
     const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     let h='';
     h+='<h4>基本信息</h4><ul>'
-      +'<li>版本：<code>v0.07.0</code>　作者：<code>konglingjun</code></li>'
+      +'<li>版本：<code>v0.07.1</code>　作者：<code>konglingjun</code></li>'
       +'<li>形态：单文件离线 HTML，零依赖，可直接以 <code>file://</code> 打开</li>'
       +'<li>配套文档：<a href="开发报告.md" target="_blank">开发报告.md</a> · <a href="更新记录.md" target="_blank">更新记录.md</a></li></ul>';
     h+='<h4>工具定位</h4>'
