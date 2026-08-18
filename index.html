@@ -263,6 +263,10 @@ table.st td.num{text-align:right}
 .modalbody th{background:var(--bg3);color:var(--fg)}
 .modalbody .verrow td:first-child{color:var(--acc);font-family:var(--mono);white-space:nowrap;font-weight:700}
 .modalbody a{color:var(--acc)}
+.samp{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg3);cursor:pointer;transition:border-color .15s,background .15s}
+.samp:hover{border-color:var(--acc);background:var(--bg2)}
+.samp .nm{font-family:var(--mono);font-size:12.5px;color:var(--fg);word-break:break-all}
+.samp .sz{font-size:11px;color:var(--fg2);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -274,6 +278,7 @@ table.st td.num{text-align:right}
   <div class="hsep"></div>
   <button class="btn icon" id="btnSide" title="折叠/展开侧栏">☰</button>
   <button class="btn" id="btnOpen">📂 打开 Trace</button>
+  <button class="btn" id="btnSamples" title="列出示例 Trace（example 目录下的 .txt）并选择打开">📁 示例 Trace</button>
   <div class="hsep"></div>
   <div class="tabs" id="tabs">
     <div class="tab on" data-p="timeline">时序泳道</div>
@@ -305,6 +310,21 @@ table.st td.num{text-align:right}
       <button class="btn sm" id="aboutClose" title="关闭弹窗">✕</button>
     </div>
     <div class="modalbody" id="aboutBody"></div>
+  </div>
+</div>
+
+<!-- 示例 Trace 选择弹窗 -->
+<div class="modal" id="samplesModal">
+  <div class="modalbox">
+    <div class="modalhead">
+      <span>示例 Trace · 选择打开</span>
+      <button class="btn sm" id="samplesClose" title="关闭弹窗">✕</button>
+    </div>
+    <div class="modalbody">
+      <p style="margin:0 0 12px;color:var(--fg2)">列出 <code>example/</code> 目录下的 <code>.txt</code> 文件，点击即可加载。若需新增示例，把 <code>.txt</code> 放入 <code>example/</code> 并在 <code>example/samples.json</code> 中登记即可。</p>
+      <div id="samplesList" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div id="samplesMsg" style="margin-top:10px;color:var(--rel)"></div>
+    </div>
   </div>
 </div>
 
@@ -3941,6 +3961,78 @@ function bind(){
   $('btnAbout').onclick=openAbout;
   $('aboutClose').onclick=closeAbout;
   $('aboutModal').addEventListener('click',e=>{if(e.target===$('aboutModal'))closeAbout();});
+  /* 示例 Trace 选择弹窗：列出 example/ 下的 .txt 并选择加载 */
+  // esc 在本作用域不可用（定义在其它函数内），这里用本地内联转义避免未定义错误
+  const _esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  // 资源基准：基于当前 index.html 所在目录构造，兼容本地与 GitHub Pages（https://user.github.io/REPO/）
+  const SAMPLES_BASE=new URL('example/',location.href).href;
+  const sampleUrl=p=>{ // p 可为相对 example/ 的路径或绝对 URL
+    try{ return new URL(p,/^https?:/i.test(p)?undefined:SAMPLES_BASE).href; }catch(e){ return SAMPLES_BASE+p; }
+  };
+  function openSamples(){
+    const list=$('samplesList'),msgEl=$('samplesMsg');
+    list.innerHTML='<div style="color:var(--fg2)">扫描示例目录中…</div>';
+    msgEl.textContent='';
+    scanSamples().then(items=>{
+      list.innerHTML='';
+      if(!items.length){
+        list.innerHTML='<div style="color:var(--fg2)">未在 example/ 下找到 .txt 示例文件。'+
+          '请将示例 trace 放入 <code>example/</code> 目录，并在 <code>example/samples.json</code> 中登记路径。</div>';
+        return;
+      }
+      for(const it of items){
+        const d=document.createElement('div');
+        d.className='samp';
+        d.innerHTML='<span class="nm">'+_esc(it.path)+'</span>'+
+          '<span class="sz">'+(it.size!=null?(it.size/1024).toFixed(1)+' KB':'')+'</span>';
+        d.onclick=()=>loadSample(it.path);
+        list.appendChild(d);
+      }
+    }).catch(err=>{
+      list.innerHTML='';
+      msgEl.textContent='扫描示例失败：'+(err&&err.message||err);
+    });
+    $('samplesModal').classList.add('on');
+  }
+  function closeSamples(){$('samplesModal').classList.remove('on');}
+  /* 读取 example/samples.json（示例清单）；若清单缺失则回退到一组探测路径 */
+  function scanSamples(){
+    return fetch(sampleUrl('samples.json'),{cache:'no-store'})
+      .then(r=>r.ok?r.json():null)
+      .catch(()=>null)
+      .then(manifest=>{
+        let paths;
+        if(manifest&&Array.isArray(manifest.files)&&manifest.files.length){
+          paths=manifest.files;
+        }else{
+          // 回退：探测已知示例路径
+          paths=['tracesource/trace.txt'];
+        }
+        return Promise.all(paths.map(p=>{
+          const u=sampleUrl(p);
+          return fetch(u,{method:'HEAD',cache:'no-store'})
+            .then(r=>r.ok?{path:p,size:+(r.headers.get('content-length')||0)}:null)
+            .catch(()=>null);
+        })).then(rs=>rs.filter(Boolean));
+      });
+  }
+  /* 通过 fetch 获取示例文本后，复用 loadText 加载（无需原生文件对话框） */
+  function loadSample(path){
+    const u=sampleUrl(path);
+    $('samplesMsg').textContent='读取 '+path+' …';
+    fetch(u,{cache:'no-store'})
+      .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
+      .then(txt=>{
+        closeSamples();
+        S.fileName=path.split('/').pop();
+        $('sFile').textContent=path;
+        loadText(txt);
+      })
+      .catch(err=>{$('samplesMsg').textContent='加载失败：'+(err&&err.message||err);});
+  }
+  $('btnSamples').onclick=openSamples;
+  $('samplesClose').onclick=closeSamples;
+  $('samplesModal').addEventListener('click',e=>{if(e.target===$('samplesModal'))closeSamples();});
   $('btnCsv').onclick=exportCsv;
   $('btnPng').onclick=exportPng;
   $('btnSvg').onclick=exportSvg;
